@@ -1,0 +1,19 @@
+{# rows: savol raqamlari; options: variantlar; prefix: input nomi oldi qo'shimchasi; scores: ball ustuni #}
+<div class="sheet-wrap">
+  <table class="sheet">
+    <thead>
+      <tr><th class="w-[46px]">№</th>{% for o in options %}<th>{{ o }}</th>{% endfor %}{% if scores %}<th class="w-[68px]">Ball</th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% for n in rows %}
+        <tr data-question="{{ n }}">
+          <td class="num">{{ n }}</td>
+          {% for o in options %}
+            <td><div class="flex justify-center"><input type="radio" class="radio" name="{{ prefix }}{{ n }}" value="{{ o }}" aria-label="{{ n }}-savol {{ o }}"></div></td>
+          {% endfor %}
+          {% if scores %}<td><input type="text" inputmode="decimal" name="s_{{ n }}" value="1" class="score field field-sm" autocomplete="off"></td>{% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

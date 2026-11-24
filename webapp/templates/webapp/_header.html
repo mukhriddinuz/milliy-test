@@ -1,0 +1,6 @@
+{# Ichki sahifalar sarlavhasi: title, back (havola, ixtiyoriy), subtitle (ixtiyoriy) #}
+<header class="hdr">
+  {% if back %}<a href="{{ back }}" class="hdr-btn" aria-label="Orqaga"><i data-lucide="chevron-left"></i></a>{% else %}<span class="hdr-spacer"></span>{% endif %}
+  <h1 class="hdr-title">{{ title }}{% if subtitle %}<span class="hdr-sub">{{ subtitle }}</span>{% endif %}</h1>
+  <span class="hdr-spacer"></span>
+</header>

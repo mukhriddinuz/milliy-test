@@ -1,0 +1,30 @@
+{% extends "webapp/base.html" %}
+{% block title %}DTM natija{% endblock %}
+{% block content %}
+{% with code=test.pk|stringformat:"s" %}{% include "webapp/_header.html" with title="DTM natijasi" subtitle="Test kodi "|add:code %}{% endwith %}
+<div class="page fade-up">
+  <div class="card text-center stack">
+    <div>
+      <div class="icon-badge success"><i data-lucide="trophy"></i></div>
+      <h2 class="text-xl font-bold mb-1">Test yakunlandi!</h2>
+      <p class="muted">Natija bot orqali ham yuborildi</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="muted">Umumiy ball</span><b class="good text-lg">{{ total }} / {{ test.max_score|floatformat:"-1" }}</b></div>
+      <div class="stat"><span class="muted">To‘g‘ri javoblar</span><b>{{ correct }}</b></div>
+    </div>
+    <div class="stats">
+      {% for r in rows %}
+        <div class="stat text-sm">
+          <span>{{ r.title }}</span>
+          <span class="flex items-center gap-2">
+            {% if r.certificate %}<span class="pill success">sertifikat</span>{% else %}<span class="muted">{{ r.correct }}/{{ r.questions }}</span>{% endif %}
+            <b>{{ r.score }}</b>
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+    <a href="{% url 'webapp:home' %}" class="btn btn-primary">Bosh sahifaga</a>
+  </div>
+</div>
+{% endblock %}

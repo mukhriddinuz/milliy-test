@@ -1,0 +1,82 @@
+{% extends "webapp/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{% with code_str=code|stringformat:"s" %}
+{% include "webapp/_header.html" with title=title subtitle="Test kodi: "|add:code_str back=back_url %}
+{% endwith %}
+
+<form method="post" id="sheet-form" class="page stack fade-up" novalidate>
+  {% csrf_token %}
+  <div class="card card-row text-sm">
+    <span class="flex-1">Savollar soni</span>
+    <b class="text-base">{{ test.questions_count }}</b>
+  </div>
+  {% if previous %}
+    <div class="alert alert-info">
+      <span>Siz bu testga {{ previous.submitted_at|date:"d.m.Y H:i" }} da javob yuborgansiz. Qayta yuborsangiz, natijangiz yangilanadi.</span></div>
+  {% endif %}
+  {% if error %}<div class="alert alert-error"><span>{{ error }}</span></div>{% endif %}
+
+  <div>
+    <h2 class="section-title">Javoblaringizni belgilang</h2>
+    {% if choice_4 %}{% include "webapp/_choice_table.html" with rows=choice_4 options=choices_4 prefix="q_" scores=False %}{% endif %}
+    {% if choice_6 %}{% include "webapp/_choice_table.html" with rows=choice_6 options=choices_6 prefix="q_" scores=False %}{% endif %}
+  </div>
+
+  {% if written %}
+  <div>
+    <h2 class="section-title">Yozma savollar</h2>
+    <div class="stack">
+      {% for w in written %}
+        <div class="card">
+          <div class="flex items-center justify-between mb-3">
+            <b>{{ w.n }}-savol</b>
+            <span class="pill muted">{{ w.parts|length }} qism</span>
+          </div>
+          <div class="space-y-2">
+            {% for p in w.parts %}
+              <div class="flex items-center gap-3">
+                <span class="w-6 text-sm font-semibold muted">{{ p }})</span>
+                <input name="w_{{ w.n }}_{{ p }}" type="text" placeholder="Javobni kiriting" autocomplete="off" class="field uppercase">
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if extra_ball %}
+  <div class="card">
+    <label for="extra_ball" class="label">Qo‘shimcha ball (yozma ish / og‘zaki qism)</label>
+    <div><input id="extra_ball" name="extra_ball" type="text" inputmode="decimal" placeholder="0" class="field" autocomplete="off"></div>
+    <p class="hint">Umumiy natija (test bali + qo‘shimcha ball) 2 ga bo‘linadi.</p>
+  </div>
+  {% endif %}
+
+  <div id="unanswered" class="alert alert-warn hidden"><span></span></div>
+  <button type="submit" id="submit-btn" class="btn btn-primary">Javoblarni yuborish</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var form = document.getElementById("sheet-form"), note = document.getElementById("unanswered");
+    var noteText = note.querySelector("span");
+    var rows = Array.from(form.querySelectorAll("tr[data-question]"));
+    function show(text) { noteText.textContent = text; note.classList.toggle("hidden", !text); }
+    function update() {
+      var missing = rows.filter(function (r) { return !r.querySelector("input:checked"); }).map(function (r) { return r.dataset.question; });
+      show(missing.length ? "Belgilanmagan savollar: " + missing.join(", ") + " (javobsiz savol noto'g'ri hisoblanadi)" : "");
+    }
+    form.addEventListener("change", update);
+    form.addEventListener("submit", function (e) {
+      var any = form.querySelector("input[type=radio]:checked") ||
+        Array.from(form.querySelectorAll("input[type=text]")).some(function (i) { return i.value.trim(); });
+      if (!any) { e.preventDefault(); show("Kamida bitta savolga javob bering."); return; }
+      setLoading(document.getElementById("submit-btn"));
+    });
+  })();
+</script>
+{% endblock %}

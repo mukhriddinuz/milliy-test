@@ -1,0 +1,195 @@
+{% load static %}<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>{% block title %}Milliy sertifikat testlari{% endblock %}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.13"></script>
+  <script src="https://unpkg.com/lucide@0.544.0/dist/umd/lucide.min.js"></script>
+  <style>
+    /* ===== Dizayn tokenlari ===== */
+    :root {
+      --bg: #1a2328; --surface: #212c33; --surface-2: #29363f; --input: #1e282e; --border: #34444e;
+      --text: #e2e8f0; --muted: #94a3b8; --primary: #4a90e2; --primary-dark: #2c5f94;
+      --success: #22c55e; --danger: #ef4444; --warning: #f59e0b;
+      --r-sm: 8px; --r: 12px; --r-lg: 16px;
+      --shadow: 0 10px 15px -3px rgb(0 0 0 / .15), 0 4px 6px -4px rgb(0 0 0 / .15);
+    }
+    html, body { background: var(--bg); color: var(--text); }
+    body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5;
+           -webkit-tap-highlight-color: transparent; }
+    svg.lucide { stroke-width: 1.75; flex-shrink: 0; }
+    b, strong { font-weight: 600; }
+
+    /* ===== Sarlavhalar ===== */
+    .hdr { position: sticky; top: 0; z-index: 20; height: 104px; display: flex; align-items: center; gap: 12px;
+           padding: 0 16px; background: linear-gradient(to bottom, #3579bd -10%, #132a41 100%); box-shadow: var(--shadow); }
+    .hdr-btn { width: 40px; height: 40px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+               background: rgb(255 255 255 / .1); color: #fff; flex-shrink: 0; transition: background .15s; }
+    .hdr-btn:active { background: rgb(255 255 255 / .2); }
+    .hdr-spacer { width: 40px; flex-shrink: 0; }
+    .hdr-title { flex: 1; text-align: center; font-size: 20px; font-weight: 700; line-height: 1.25; color: #fff; }
+    .hdr-sub { display: block; font-size: 13px; font-weight: 500; color: rgb(255 255 255 / .7); margin-top: 2px; }
+    .hero { position: relative; padding: 44px 20px 36px; text-align: center;
+            background: linear-gradient(to bottom, #3579bd -10%, #1a2328 100%); }
+    .hero-title { font-size: 28px; font-weight: 700; line-height: 1.2; letter-spacing: -.01em; color: #fff; }
+    .hero-sub { color: rgb(255 255 255 / .7); font-size: 14px; margin-top: 6px; }
+
+    /* ===== Joylashuv ===== */
+    .page { padding: 20px 16px 8px; }
+    .stack > * + * { margin-top: 16px; }
+    .section-title { display: flex; align-items: center; gap: 8px; margin: 0 4px 10px; font-size: 12px; font-weight: 600;
+                     letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .section-title .pill { text-transform: none; letter-spacing: 0; font-weight: 500; }
+    .muted { color: var(--muted); }
+
+    /* ===== Kartochka ===== */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; }
+    .card-row { display: flex; align-items: center; gap: 12px; }
+    .list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+    .list-item { display: flex; align-items: center; gap: 12px; padding: 16px; min-height: 60px; transition: background .15s; }
+    .list-item + .list-item { border-top: 1px solid var(--border); }
+    a.list-item:active { background: var(--surface-2); }
+    .icon-badge { width: 56px; height: 56px; border-radius: 999px; margin: 0 auto 14px; display: flex; align-items: center;
+                  justify-content: center; background: rgb(74 144 226 / .12); color: var(--primary); }
+    .icon-badge svg { width: 28px; height: 28px; }
+    .icon-badge.success { background: rgb(34 197 94 / .15); color: var(--success); }
+    .icon-badge.danger { background: rgb(239 68 68 / .15); color: var(--danger); }
+
+    /* ===== Belgilar ===== */
+    .pill { display: inline-block; height: 26px; line-height: 26px; padding: 0 10px; border-radius: 999px; vertical-align: middle;
+            font-size: 12px; font-weight: 600; background: rgb(74 144 226 / .15); color: #8bbcf2; max-width: 100%;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pill.muted { background: var(--surface-2); color: var(--muted); }
+    .pill.success { background: rgb(34 197 94 / .15); color: #6ee7a0; }
+    .count { min-width: 44px; height: 28px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center;
+             justify-content: center; font-weight: 600; font-size: 13px; background: rgb(255 255 255 / .06); color: var(--text); }
+
+    /* ===== Formalar ===== */
+    .label { display: block; font-size: 14px; font-weight: 500; color: #cbd5e1; margin-bottom: 6px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .error-text { font-size: 13px; color: #f87171; margin-top: 6px; }
+    .field { width: 100%; height: 48px; padding: 0 14px; border-radius: var(--r); border: 1px solid var(--border); color: #fff;
+             background: var(--input); outline: none; appearance: none; transition: border-color .15s, box-shadow .15s; }
+    .field::placeholder { color: #64748b; }
+    .field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(74 144 226 / .25); }
+    .field.is-invalid { border-color: var(--danger); }
+    .field:disabled { opacity: .5; }
+    select.field { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+                   background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px; }
+    select.field option { background: var(--surface); color: #fff; }
+    .field-sm { height: 34px; width: 56px; padding: 0 6px; text-align: center; border-radius: var(--r-sm); }
+
+    /* Switch (barcha checkboxlar uchun bitta uslub) */
+    .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; cursor: pointer;
+              background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); user-select: none; }
+    .toggle-text { font-size: 14px; font-weight: 500; }
+    .toggle-text small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+    .switch { appearance: none; width: 44px; height: 26px; border-radius: 999px; background: var(--surface-2);
+              border: 1px solid var(--border); position: relative; flex-shrink: 0; cursor: pointer; transition: background .2s; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 999px;
+                     background: #cbd5e1; transition: transform .2s, background .2s; }
+    .switch:checked { background: var(--success); border-color: var(--success); }
+    .switch:checked::after { transform: translateX(18px); background: #fff; }
+
+    /* ===== Tugmalar ===== */
+    .btn { width: 100%; height: 48px; border-radius: var(--r); display: inline-flex; align-items: center; justify-content: center;
+           gap: 8px; font-weight: 600; font-size: 15px; transition: transform .1s, opacity .15s, background .15s; }
+    .btn:active:not(:disabled) { transform: scale(.98); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn svg { width: 20px; height: 20px; }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: #fff; box-shadow: var(--shadow); }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-sm { width: auto; height: 34px; padding: 0 12px; font-size: 13px; border-radius: var(--r-sm); }
+    .btn-icon { width: 34px; height: 34px; padding: 0; border-radius: var(--r-sm); font-size: 18px; }
+    .btn-icon.danger { background: rgb(239 68 68 / .15); color: #f87171; }
+    .btn-icon.primary { background: rgb(74 144 226 / .18); color: #8bbcf2; }
+    .spinner { display: inline-block; width: 20px; height: 20px; border-radius: 999px; border: 2px solid rgb(255 255 255 / .3);
+               border-top-color: #fff; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ===== Ogohlantirishlar ===== */
+    .alert { padding: 12px 14px; border-radius: var(--r-sm); font-size: 14px; line-height: 1.45; border-left: 3px solid; }
+    .alert-error { background: rgb(239 68 68 / .08); border-color: var(--danger); color: #fca5a5; }
+    .alert-info { background: rgb(74 144 226 / .08); border-color: var(--primary); color: #cbd5e1; }
+    .alert-warn { background: rgb(245 158 11 / .08); border-color: var(--warning); color: #fcd34d; }
+
+    /* ===== Natija va holat sahifalari ===== */
+    .state { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             text-align: center; padding: 32px 24px; }
+    .state h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .stats { background: var(--surface-2); border-radius: var(--r); padding: 4px 16px; text-align: left; }
+    .stat { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; font-size: 15px; }
+    .stat + .stat { border-top: 1px solid var(--border); }
+    .stat b { color: #fff; }
+    .stat .good { color: var(--success); }
+
+    /* ===== Javob varag'i ===== */
+    .sheet-wrap { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+    .sheet-wrap + .sheet-wrap { margin-top: 12px; }
+    .sheet { width: 100%; border-collapse: collapse; color: #fff; font-size: 14px; }
+    .sheet th { background: var(--surface-2); height: 40px; font-weight: 600; color: #cbd5e1; }
+    .sheet td { height: 42px; text-align: center; font-weight: 600; border-top: 1px solid var(--border); }
+    .sheet th + th, .sheet td + td { border-left: 1px solid var(--border); }
+    .sheet td.num { width: 46px; color: var(--muted); }
+    .sheet tr:nth-child(even) td { background: rgb(255 255 255 / .015); }
+    .radio { width: 20px; height: 20px; border-radius: 999px; appearance: none; border: 2px solid #64748b; cursor: pointer;
+             transition: transform .1s, background .15s; }
+    .radio:active { transform: scale(.92); }
+    .radio:checked { background: var(--primary); border-color: var(--primary); box-shadow: inset 0 0 0 3px var(--bg); }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .35s ease both; }
+    [hidden], .hidden { display: none !important; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+  <div class="w-full min-h-screen {% if not hide_nav %}pb-[100px]{% endif %}">
+    <main class="w-full max-w-xl mx-auto">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {% if not hide_nav %}{% include "webapp/_navbar.html" %}{% endif %}
+  {% if posted %}{{ posted|json_script:"posted-data" }}{% endif %}
+
+  <script>
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      if (tg) {
+        tg.ready(); tg.expand();
+        try { tg.setHeaderColor("#1a2328"); tg.setBackgroundColor("#1a2328"); } catch (e) {}
+        // Boshqa Telegram akkaunt bilan ochilgan bo'lsa — qayta tasdiqlash
+        var sessionId = "{{ request.tg.id|default:'' }}";
+        var tgId = tg.initDataUnsafe && tg.initDataUnsafe.user && String(tg.initDataUnsafe.user.id);
+        if (sessionId && tgId && tgId !== sessionId && tg.initData) {
+          var fd = new FormData();
+          fd.append("init_data", tg.initData);
+          fd.append("next", location.pathname + location.search);
+          fd.append("csrfmiddlewaretoken", "{{ csrf_token }}");
+          fetch("{% url 'webapp:auth' %}", { method: "POST", body: fd, credentials: "same-origin" })
+            .then(function (r) { return r.json(); }).then(function () { location.reload(); });
+        }
+      }
+      // Server xato qaytarganda formadagi qiymatlarni tiklash
+      var posted = document.getElementById("posted-data");
+      if (posted) {
+        var data = JSON.parse(posted.textContent);
+        Object.keys(data).forEach(function (name) {
+          document.querySelectorAll('[name="' + CSS.escape(name) + '"]').forEach(function (el) {
+            if (el.type === "radio") el.checked = el.value === data[name];
+            else if (el.type === "checkbox") el.checked = data[name] === "on";
+            else if (el.type !== "hidden" || el.dataset.restore !== undefined) el.value = data[name];
+          });
+        });
+      }
+      if (window.lucide) lucide.createIcons();
+    })();
+    // Tugmani "yuklanmoqda" holatiga o'tkazish (barcha formalar uchun)
+    window.setLoading = function (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; };
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

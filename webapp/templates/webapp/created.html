@@ -1,0 +1,51 @@
+{% extends "webapp/base.html" %}
+{% block title %}Test yaratildi{% endblock %}
+{% block content %}
+{% include "webapp/_header.html" with title="Test yaratildi" %}
+<div class="page fade-up">
+  <div class="card text-center stack">
+    <div>
+      <div class="icon-badge success"><i data-lucide="circle-check"></i></div>
+      <h2 class="text-xl font-bold mb-1">Muvaffaqiyatli yaratildi!</h2>
+      <p class="muted">{{ title }}</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <span class="muted">Test kodi</span>
+        <span class="flex items-center gap-2">
+          <b id="code" class="text-2xl font-mono">{{ code }}</b>
+          <button type="button" id="copy-btn" class="btn btn-icon primary" aria-label="Nusxa olish"><i data-lucide="copy" class="!w-4 !h-4"></i></button>
+        </span>
+      </div>
+    </div>
+    <p id="copied" class="text-sm text-[#6ee7a0] hidden">Nusxa olindi!</p>
+
+    {% if qr %}
+      <div>
+        <img src="{{ qr }}" alt="QR kod" class="w-44 h-44 mx-auto rounded-xl bg-white p-2">
+        <a href="{{ qr }}" download class="btn btn-secondary btn-sm mt-3">QR kodni yuklab olish</a>
+      </div>
+    {% endif %}
+    {% if link %}<p class="text-xs muted break-all">{{ link }}</p>{% endif %}
+
+    <div class="alert alert-info text-left">
+      <span>Botda boshqarish buyruqlari: {% for c in commands %}<code class="font-mono">{{ c }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+    </div>
+
+    <a href="{% url 'webapp:home' %}" class="btn btn-primary">Bosh sahifaga</a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById("copy-btn").addEventListener("click", function () {
+    var code = document.getElementById("code").textContent.trim();
+    var done = function () {
+      var el = document.getElementById("copied"); el.classList.remove("hidden");
+      setTimeout(function () { el.classList.add("hidden"); }, 2000);
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(code).then(done);
+  });
+</script>
+{% endblock %}

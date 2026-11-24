@@ -1,0 +1,25 @@
+{% extends "webapp/base.html" %}
+{% block title %}Test yaratish{% endblock %}
+{% block content %}
+{% url 'webapp:home' as back_url %}
+{% include "webapp/_header.html" with title="Test yaratish" subtitle="Test turini tanlang" back=back_url %}
+
+<div class="page">
+  <div class="list">
+    <a href="{% url 'webapp:create_national' %}" class="list-item">
+      <span class="flex-1"><b class="block">Milliy sertifikat</b><span class="text-xs muted">35 ta variantli va yozma savollar</span></span>
+      <i data-lucide="chevron-right" class="w-5 h-5 muted"></i>
+    </a>
+    <a href="{% url 'webapp:create_dtm' %}" class="list-item">
+      <span class="flex-1"><b class="block">DTM (blok test)</b><span class="text-xs muted">2 ta asosiy va 3 ta majburiy fan, 90 savol</span></span>
+      <i data-lucide="chevron-right" class="w-5 h-5 muted"></i>
+    </a>
+    {% if request.tg_user.is_admin %}
+    <a href="{% url 'webapp:booktest_create' %}" class="list-item">
+      <span class="flex-1"><b class="block">Kitob testi</b><span class="text-xs muted">QR kod bilan, har savolga alohida ball</span></span>
+      <i data-lucide="chevron-right" class="w-5 h-5 muted"></i>
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

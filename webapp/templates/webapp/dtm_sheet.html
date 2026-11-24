@@ -1,0 +1,116 @@
+{% extends "webapp/base.html" %}
+{% block title %}DTM testni yuborish{% endblock %}
+{% block content %}
+{% url 'webapp:dtm' as back_url %}
+{% with code=test.pk|stringformat:"s" %}
+{% include "webapp/_header.html" with title="DTM testni yuborish" subtitle="Test kodi: "|add:code back=back_url %}
+{% endwith %}
+
+<form method="post" id="dtm-form" class="page stack fade-up" novalidate>
+  {% csrf_token %}
+  <div class="card card-row text-sm">
+    <span class="flex-1">Maksimal ball</span>
+    <b class="text-base">{{ test.max_score|floatformat:"-1" }}</b>
+  </div>
+  {% if previous %}
+    <div class="alert alert-info"><span>Siz bu testga javob yuborgansiz ({{ previous.total_score }} ball). Qayta yuborsangiz, natijangiz yangilanadi.</span></div>
+  {% endif %}
+  {% if error %}<div class="alert alert-error"><span>{{ error }}</span></div>{% endif %}
+
+  <div class="card stack">
+    <div>
+      <h2 class="section-title !mb-1">Sertifikat ballari</h2>
+      <p class="text-sm muted">Milliy sertifikatingiz bo'lgan fanlar uchun ballni kiriting — o'sha fan savollari so'ralmaydi.</p>
+    </div>
+    {% for b in blocks %}{% if not b.mandatory %}
+      <div>
+        <label class="label" for="cert_{{ b.idx }}">{{ b.title }} <span class="muted">(maks {{ b.max_score|floatformat:"-1" }} ball)</span></label>
+        <input id="cert_{{ b.idx }}" name="cert_{{ b.idx }}" type="text" inputmode="decimal" placeholder="Ball (ixtiyoriy)"
+               data-max="{{ b.max_score|stringformat:'s' }}" data-block="{{ b.idx }}" class="cert field" autocomplete="off">
+        <p class="cert-error error-text hidden"></p>
+      </div>
+    {% endif %}{% endfor %}
+    {% for b in blocks %}{% if b.mandatory %}
+      <label class="toggle">
+        <span class="toggle-text">{{ b.title }} — sertifikatim bor<small>{{ mandatory_certificate|floatformat:"-1" }} ball, savollar so'ralmaydi</small></span>
+        <input type="checkbox" name="cert_{{ b.idx }}" data-block="{{ b.idx }}" class="mandatory-cert switch">
+      </label>
+    {% endif %}{% endfor %}
+  </div>
+
+  {% for b in blocks %}
+    <div class="dtm-block" data-block="{{ b.idx }}">
+      <h2 class="section-title">
+        {{ b.title }}
+        <span class="pill muted ml-auto">{{ b.point }} ball{% if b.mandatory %} · majburiy{% endif %}</span>
+      </h2>
+      <div class="covered-note alert alert-info hidden"></div>
+      <div class="block-table">
+        <div class="sheet-wrap">
+          <table class="sheet">
+            <thead><tr><th class="w-[46px]">№</th>{% for o in choices %}<th>{{ o }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for shown, number in b.rows %}
+                <tr>
+                  <td class="num">{{ shown }}</td>
+                  {% for o in choices %}
+                    <td><div class="flex justify-center"><input type="radio" class="radio" name="b{{ b.idx }}_{{ shown }}" value="{{ o }}"></div></td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+
+  <button type="submit" id="submit-btn" class="btn btn-primary">Javoblarni yuborish</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var form = document.getElementById("dtm-form");
+    var certs = Array.from(form.querySelectorAll("input.cert"));
+    var mandatory = Array.from(form.querySelectorAll("input.mandatory-cert"));
+
+    function parse(input) {
+      var v = input.value.trim().replace(",", ".");
+      if (!v) return { ok: true, ball: 0 };
+      if (!/^\d+(\.\d+)?$/.test(v)) return { ok: false, msg: "Faqat raqam kiriting" };
+      var ball = parseFloat(v), max = parseFloat(input.dataset.max);
+      if (ball <= 0 || ball > max) return { ok: false, msg: "Ball 0 dan katta va " + max + " dan oshmasligi kerak" };
+      return { ok: true, ball: ball };
+    }
+    function setCovered(idx, covered, note) {
+      var block = form.querySelector('.dtm-block[data-block="' + idx + '"]');
+      block.querySelector(".block-table").classList.toggle("hidden", covered);
+      var el = block.querySelector(".covered-note");
+      el.textContent = covered ? note : "";
+      el.classList.toggle("hidden", !covered);
+    }
+    function refresh() {
+      var ok = true;
+      certs.forEach(function (input) {
+        var r = parse(input), err = input.nextElementSibling;
+        input.classList.toggle("is-invalid", !r.ok);
+        err.textContent = r.msg || ""; err.classList.toggle("hidden", r.ok);
+        if (!r.ok) ok = false;
+        setCovered(input.dataset.block, r.ok && r.ball > 0, "✓ Sertifikat: " + r.ball + " ball");
+      });
+      mandatory.forEach(function (box) {
+        setCovered(box.dataset.block, box.checked, "✓ Sertifikat: 10/10 — {{ mandatory_certificate|floatformat:'-1' }} ball");
+      });
+      return ok;
+    }
+    form.addEventListener("input", refresh);
+    form.addEventListener("change", refresh);
+    form.addEventListener("submit", function (e) {
+      if (!refresh()) { e.preventDefault(); return; }
+      setLoading(document.getElementById("submit-btn"));
+    });
+    refresh();
+  })();
+</script>
+{% endblock %}

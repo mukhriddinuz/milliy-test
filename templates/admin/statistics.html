@@ -1,0 +1,131 @@
+{% extends "admin/base_site.html" %}
+{% load admin_dashboard %}
+
+{% block title %}Statistika | {{ site_title|default:"Milliy Test admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Bosh sahifa</a> › Statistika
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% include "admin/_stat_cards.html" %}
+
+  <div class="mt-panels">
+    <div class="mt-panel">
+      <h2>👥 Ro'yxatdan o'tish — oxirgi {{ days }} kun</h2>
+      <div class="mt-chart">
+        {% for d in registrations %}
+        <div class="mt-bar" title="{{ d.day|date:'d.m.Y' }}: {{ d.count }} ta">
+          <em>{% if d.count %}{{ d.count }}{% endif %}</em>
+          <i style="height:{{ d.height|stringformat:'s' }}%"></i>
+          <small>{{ d.day|date:"d.m" }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mt-panel">
+      <h2>📝 Topshirilgan javoblar — oxirgi {{ days }} kun</h2>
+      <div class="mt-chart green">
+        {% for d in submissions %}
+        <div class="mt-bar" title="{{ d.day|date:'d.m.Y' }}: {{ d.count }} ta">
+          <em>{% if d.count %}{{ d.count }}{% endif %}</em>
+          <i style="height:{{ d.height|stringformat:'s' }}%"></i>
+          <small>{{ d.day|date:"d.m" }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mt-panel">
+      <h2>🏆 Eng ko'p qatnashilgan testlar</h2>
+      <table>
+        <thead><tr><th>Test</th><th>Muallif</th><th>Qatnashchi</th><th>O'rtacha</th></tr></thead>
+        <tbody>
+        {% for t in top_tests %}
+          <tr>
+            <td><a href="{% url 'admin:main_test_change' t.pk %}">#{{ t.pk }} {{ t.title }}</a><br><small>{{ t.subject.name }}</small></td>
+            <td>{{ t.creator.full_name }}</td>
+            <td><a href="{% url 'admin:main_testresult_changelist' %}?test__id__exact={{ t.pk }}">{{ t.participants }}</a></td>
+            <td>{{ t.avg_pct|floatformat:1 }}%</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4">Hali natijalar yo'q</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-panel">
+      <h2>✍️ Eng faol test mualliflari</h2>
+      <table>
+        <thead><tr><th>Muallif</th><th>Testlar</th><th>Qatnashchilar</th></tr></thead>
+        <tbody>
+        {% for u in top_creators %}
+          <tr>
+            <td><a href="{% url 'admin:main_telegramuser_change' u.pk %}">{{ u.full_name }}</a></td>
+            <td><a href="{% url 'admin:main_test_changelist' %}?creator__id__exact={{ u.pk }}">{{ u.tests_count }}</a></td>
+            <td>{{ u.participants }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="3">Hali testlar yo'q</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-panel">
+      <h2>🗺️ Viloyatlar bo'yicha</h2>
+      <table>
+        <tbody>
+        {% for r in regions %}
+          <tr>
+            <td><a href="{% url 'admin:main_telegramuser_changelist' %}?region={{ r.region|urlencode }}">{{ r.region|default:"—" }}</a></td>
+            <td style="width:45%"><div class="mt-hbar"><i style="width:{{ r.percent|stringformat:'s' }}%"></i></div></td>
+            <td style="text-align:right">{{ r.count }} <small>({{ r.percent }}%)</small></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-panel">
+      <h2>📚 Fanlar</h2>
+      <table>
+        <thead><tr><th>Fan</th><th>Testlar</th><th>Natijalar</th></tr></thead>
+        <tbody>
+        {% for s in subjects %}
+          <tr>
+            <td><a href="{% url 'admin:main_subject_change' s.pk %}">{{ s.name }}</a>{% if not s.is_active %} <span class="mt-badge mt-badge-grey">nofaol</span>{% endif %}</td>
+            <td>{{ s.tests_count }}</td>
+            <td>{{ s.results_count }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-panel" style="grid-column:1/-1">
+      <h2>🆕 Oxirgi ro'yxatdan o'tganlar</h2>
+      <table>
+        <thead><tr><th>F.I.Sh.</th><th>Telegram ID</th><th>Username</th><th>Telefon</th><th>Viloyat</th><th>Sana</th></tr></thead>
+        <tbody>
+        {% for u in recent_users %}
+          <tr>
+            <td><a href="{% url 'admin:main_telegramuser_change' u.pk %}">{{ u.full_name }}</a></td>
+            <td><code>{{ u.telegram_id }}</code></td>
+            <td>{% if u.username %}<a href="https://t.me/{{ u.username }}" target="_blank" rel="noopener">@{{ u.username }}</a>{% else %}—{% endif %}</td>
+            <td>{{ u.phone }}</td>
+            <td>{{ u.region }}, {{ u.district }}</td>
+            <td>{{ u.created_at|date:"d.m.Y H:i" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

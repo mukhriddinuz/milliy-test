@@ -1,0 +1,21 @@
+{% extends "webapp/base.html" %}
+{% block title %}Kitob testi natijasi{% endblock %}
+{% block content %}
+{% include "webapp/_header.html" with title="Kitob testi natijasi" subtitle=test.title %}
+<div class="page fade-up">
+  <div class="card text-center stack">
+    <div>
+      <div class="icon-badge {% if grade == 'F' %}danger{% else %}success{% endif %}"><i data-lucide="{% if grade == 'F' %}circle-x{% else %}award{% endif %}"></i></div>
+      <h2 class="text-3xl font-bold mb-1">{{ grade }}</h2>
+      <p class="muted">{{ message }}</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="muted">To‘g‘ri javoblar</span><b>{{ result.correct }} / {{ result.total }}</b></div>
+      <div class="stat"><span class="muted">Ball</span><b class="good">{{ result.score }}</b></div>
+      <div class="stat"><span class="muted">Foiz</span><b>{{ result.percentage }}%</b></div>
+      {% if result.extra_ball %}<div class="stat"><span class="muted">Qo‘shimcha ball</span><b>{{ result.extra_ball }}</b></div>{% endif %}
+    </div>
+    <a href="{% url 'webapp:home' %}" class="btn btn-primary">Bosh sahifaga</a>
+  </div>
+</div>
+{% endblock %}

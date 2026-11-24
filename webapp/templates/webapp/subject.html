@@ -1,0 +1,27 @@
+{% extends "webapp/base.html" %}
+{% block title %}{{ subject.name }} MS testlar{% endblock %}
+{% block content %}
+{% url 'webapp:home' as back_url %}
+{% include "webapp/_header.html" with title=subject.name subtitle="Ochiq MS testlar" back=back_url %}
+
+<div class="page">
+  <div class="list">
+    {% for test in tests %}
+      <div class="list-item">
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold truncate">{{ test.channel_username|default:"—" }}</p>
+          <p class="text-[13px] muted mt-0.5">
+            {% if test.start_time %}{{ test.start_time|date:"d.m.Y H:i" }}{% else %}Vaqti noma'lum{% endif %}
+            {% if not test.is_active %}<span class="pill muted ml-1">yakunlangan</span>{% endif %}
+          </p>
+        </div>
+        {% if test.channel_username %}
+          <a href="https://t.me/{{ test.channel_username|cut:'@' }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Kanal</a>
+        {% endif %}
+      </div>
+    {% empty %}
+      <div class="list-item muted justify-center">Hozircha ochiq testlar yo‘q</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

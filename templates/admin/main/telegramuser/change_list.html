@@ -1,0 +1,11 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+<li><a href="{% url 'admin:main_telegramuser_statistics' %}">📊 Statistika</a></li>
+{{ block.super }}
+{% endblock %}
+
+{% block content %}
+{% include "admin/_stat_cards.html" %}
+{{ block.super }}
+{% endblock %}

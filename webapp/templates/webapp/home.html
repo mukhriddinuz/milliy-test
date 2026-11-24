@@ -1,0 +1,22 @@
+{% extends "webapp/base.html" %}
+{% block content %}
+<section class="hero">
+  <h1 class="hero-title">Milliy sertifikat testlari</h1>
+  <p class="hero-sub">Fanni tanlang va ochiq testlarni ko‘ring</p>
+</section>
+
+<div class="page">
+  <h2 class="section-title">Fanlar</h2>
+  <div class="list">
+    {% for subject in subjects %}
+      <a href="{% url 'webapp:subject' subject.pk %}" class="list-item">
+        <span class="flex-1 font-semibold">{{ subject.name }}</span>
+        <span class="count">{{ subject.public_count }} ta</span>
+        <i data-lucide="chevron-right" class="w-5 h-5 muted"></i>
+      </a>
+    {% empty %}
+      <div class="list-item muted justify-center">Ma'lumotlar topilmadi</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

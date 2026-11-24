@@ -1,0 +1,72 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:"Milliy Test admin" }}{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">🎓 {{ site_header|default:"Milliy Test" }}</a></div>
+{% endblock %}
+
+{% block userlinks %}
+<a href="{% url 'admin:main_telegramuser_statistics' %}">📊 Statistika</a> /
+{{ block.super }}
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  :root {
+    --mt-green: #1f9d55; --mt-red: #d64545; --mt-gold: #c98a00; --mt-blue: #2f6fdb; --mt-grey: #8a8f98;
+    --mt-card-bg: var(--body-bg, #fff); --mt-soft: var(--darkened-bg, #f6f7f9);
+  }
+  /* Belgilar (badge) */
+  .mt-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;
+              line-height:1.6; white-space:nowrap; color:#fff; }
+  .mt-badge-green { background:var(--mt-green); } .mt-badge-red { background:var(--mt-red); }
+  .mt-badge-grey { background:var(--mt-grey); }  .mt-badge-gold { background:var(--mt-gold); }
+
+  /* Kartochkalar */
+  .mt-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin:0 0 20px; }
+  .mt-card { background:var(--mt-card-bg); border:1px solid var(--hairline-color,#e5e7eb); border-left:4px solid var(--mt-blue);
+             border-radius:8px; padding:12px 14px; }
+  .mt-card b { display:block; font-size:24px; line-height:1.2; color:var(--body-fg,#222); }
+  .mt-card span { color:var(--body-quiet-color,#666); font-size:12px; }
+  .mt-card small { display:block; color:var(--body-quiet-color,#888); font-size:11px; margin-top:2px; }
+  .mt-card a { color:inherit; text-decoration:none; }
+  .mt-card.green { border-left-color:var(--mt-green); } .mt-card.red { border-left-color:var(--mt-red); }
+  .mt-card.gold { border-left-color:var(--mt-gold); }   .mt-card.grey { border-left-color:var(--mt-grey); }
+
+  /* Ma'lumot paneli (foydalanuvchi sahifasi) */
+  .mt-info-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+  .mt-info { background:var(--mt-soft); border:1px solid var(--hairline-color,#e5e7eb); border-radius:6px; padding:8px 10px; }
+  .mt-info span { display:block; font-size:11px; color:var(--body-quiet-color,#777); text-transform:uppercase; }
+  .mt-info strong { font-size:14px; }
+
+  /* Jadval */
+  .mt-table { border-collapse:collapse; min-width:420px; }
+  .mt-table th, .mt-table td { padding:4px 10px; border:1px solid var(--hairline-color,#e5e7eb); text-align:left; }
+  .mt-table thead th { background:var(--mt-soft); }
+
+  /* Javoblar katakchalari */
+  .mt-cells { display:flex; flex-wrap:wrap; gap:4px; max-width:640px; }
+  .mt-cell { width:30px; height:26px; display:inline-flex; align-items:center; justify-content:center;
+             border-radius:4px; font-size:11px; font-weight:600; color:#fff; }
+  .mt-cell-ok { background:var(--mt-green); } .mt-cell-no { background:var(--mt-red); }
+
+  /* Statistika sahifasi */
+  .mt-panels { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
+  .mt-panel { background:var(--mt-card-bg); border:1px solid var(--hairline-color,#e5e7eb); border-radius:8px; padding:14px 16px; }
+  .mt-panel h2 { margin:0 0 12px; font-size:15px; background:none; color:var(--body-fg); padding:0; }
+  .mt-panel table { width:100%; }
+  .mt-chart { display:flex; align-items:flex-end; gap:4px; height:140px; padding-top:18px; }
+  .mt-bar { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0; }
+  .mt-bar i { display:block; width:100%; background:var(--mt-blue); border-radius:3px 3px 0 0; min-height:2px; }
+  .mt-bar em { font-style:normal; font-size:10px; color:var(--body-quiet-color,#666); }
+  .mt-bar small { font-size:9px; color:var(--body-quiet-color,#888); margin-top:3px; white-space:nowrap; }
+  .mt-chart.green .mt-bar i { background:var(--mt-green); }
+  .mt-hbar { background:var(--mt-soft); border-radius:3px; height:8px; overflow:hidden; min-width:80px; }
+  .mt-hbar i { display:block; height:100%; background:var(--mt-blue); }
+  @media (max-width:767px) { .mt-panels { grid-template-columns:1fr; } .mt-card b { font-size:20px; } }
+</style>
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

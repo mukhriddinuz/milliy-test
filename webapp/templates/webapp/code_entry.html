@@ -1,0 +1,42 @@
+{% extends "webapp/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{% url 'webapp:home' as back_url %}
+{% include "webapp/_header.html" with title=title back=back_url %}
+
+<div class="page stack">
+  <form method="get" action="{{ action }}" class="card stack" id="code-form">
+    <p class="muted text-sm">Test muallifidan olgan kodni kiriting.</p>
+    <div>
+      <label for="code" id="code-label" class="label">Test kodi</label>
+      <div><input id="code" name="code" type="text" inputmode="numeric" value="{{ code }}" placeholder="Masalan: 1234" autocomplete="off"
+               class="field {% if error %}is-invalid{% endif %}"></div>
+      {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
+    </div>
+    <button type="submit" id="ok-btn" class="btn btn-primary">Davom etish</button>
+  </form>
+
+  {% if nav == "send" and title != "Kitob testi" %}
+    <a href="{% url 'webapp:booktest' %}" class="list list-item">
+      <span class="flex-1"><b class="block text-sm">Kitobdagi test</b><span class="text-xs muted">Kitob testi kodini kiriting</span></span>
+      <i data-lucide="chevron-right" class="w-5 h-5 muted"></i>
+    </a>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var input = document.getElementById("code"), label = document.getElementById("code-label");
+    input.addEventListener("input", function () {
+      var bad = !/^\d*$/.test(input.value);
+      input.classList.toggle("is-invalid", bad);
+      label.textContent = bad ? "Faqat raqam kiritilishi kerak!" : "Test kodi";
+    });
+    document.getElementById("code-form").addEventListener("submit", function (e) {
+      if (!/^\d+$/.test(input.value)) { e.preventDefault(); input.classList.add("is-invalid"); return; }
+      setLoading(document.getElementById("ok-btn"));
+    });
+  })();
+</script>
+{% endblock %}

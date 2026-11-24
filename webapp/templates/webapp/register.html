@@ -1,0 +1,104 @@
+{% extends "webapp/base.html" %}
+{% block title %}{% if editing %}Tahrirlash{% else %}Ro'yxatdan o'tish{% endif %}{% endblock %}
+{% block content %}
+{% if editing %}{% url 'webapp:profile' as back_url %}{% endif %}
+{% include "webapp/_header.html" with title=editing|yesno:"Ma'lumotlarni tahrirlash,Ro'yxatdan o'tish" back=back_url %}
+
+<div class="page">
+  <form method="post" class="card stack" novalidate id="register-form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if not editing %}
+      <div class="alert alert-info"><span>Testlarda qatnashish uchun ma'lumotlaringizni kiriting.</span></div>
+    {% endif %}
+
+    <div>
+      <label class="label" for="id_name">Ism</label>
+      <div><input id="id_name" name="name" value="{{ form.name.value|default:'' }}" class="field" placeholder="Ismingizni kiriting" required maxlength="100"></div>
+      {% for e in form.name.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+    <div>
+      <label class="label" for="id_surname">Familiya</label>
+      <div><input id="id_surname" name="surname" value="{{ form.surname.value|default:'' }}" class="field" placeholder="Familiyangizni kiriting" required maxlength="100"></div>
+      {% for e in form.surname.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+    <div>
+      <label class="label" for="id_father_name">Sharif</label>
+      <div><input id="id_father_name" name="father_name" value="{{ form.father_name.value|default:'' }}" class="field" placeholder="Sharifingizni kiriting" required maxlength="100"></div>
+      {% for e in form.father_name.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+    <div>
+      <label class="label" for="id_phone">Telefon raqam</label>
+      <div><input id="id_phone" type="tel" name="phone" value="{{ form.phone.value|default:'+998' }}" class="field" placeholder="+998901234567" required inputmode="tel"></div>
+      {% for e in form.phone.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+    <div>
+      <label class="label" for="id_region">Viloyat</label>
+      <div><select id="id_region" name="region" class="field" required>
+          {% for value, label in form.fields.region.choices %}
+            <option value="{{ value }}" {% if value == form.region.value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select></div>
+      {% for e in form.region.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+    <div>
+      <label class="label" for="id_district">Tuman</label>
+      <div><select id="id_district" name="district" class="field" required data-value="{{ form.district.value|default:'' }}">
+          <option value="">Tumanni tanlang</option>
+        </select></div>
+      {% for e in form.district.errors %}<p class="error-text">{{ e }}</p>{% endfor %}
+    </div>
+
+    {% for e in form.non_field_errors %}<div class="alert alert-error"><span>{{ e }}</span></div>{% endfor %}
+    <p id="client-error" class="error-text text-center hidden"></p>
+
+    <div class="flex gap-3">
+      {% if editing %}<a href="{% url 'webapp:profile' %}" class="btn btn-secondary">Bekor qilish</a>{% endif %}
+      <button type="submit" id="submit-btn" class="btn btn-primary">
+        {% if editing %}Saqlash{% else %}Ro'yxatdan o'tish{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+{{ regions|json_script:"regions-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var regions = JSON.parse(document.getElementById("regions-data").textContent);
+    var region = document.getElementById("id_region"), district = document.getElementById("id_district");
+    var phone = document.getElementById("id_phone"), form = document.getElementById("register-form");
+
+    function fillDistricts(keep) {
+      var selected = keep ? district.dataset.value : "";
+      district.innerHTML = '<option value="">Tumanni tanlang</option>';
+      (regions[region.value] || []).forEach(function (d) {
+        var o = document.createElement("option");
+        o.value = d; o.textContent = d; if (d === selected) o.selected = true;
+        district.appendChild(o);
+      });
+      district.disabled = !region.value;
+    }
+    region.addEventListener("change", function () { fillDistricts(false); });
+    fillDistricts(true);
+
+    phone.addEventListener("input", function () {
+      var v = phone.value.replace(/[^\d+]/g, "");
+      if (!v.startsWith("+998")) v = "+998" + v.replace(/^\+?(998)?/, "");
+      phone.value = v.slice(0, 13);
+    });
+
+    form.addEventListener("submit", function (e) {
+      var err = document.getElementById("client-error");
+      if (phone.value.length !== 13) {
+        e.preventDefault();
+        err.textContent = "Telefon raqami to'liq kiritilishi kerak (+998XXXXXXXXX)";
+        err.classList.remove("hidden");
+        return;
+      }
+      setLoading(document.getElementById("submit-btn"));
+    });
+  })();
+</script>
+{% endblock %}

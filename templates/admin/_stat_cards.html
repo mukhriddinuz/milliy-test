@@ -1,0 +1,17 @@
+{% load admin_dashboard %}<div class="mt-cards">
+  <div class="mt-card"><a href="{% url 'admin:main_telegramuser_changelist' %}"><b>{{ stats.users_total }}</b><span>Foydalanuvchilar</span></a>
+    <small>+{{ stats.users_today }} bugun · +{{ stats.users_week }} 7 kunda</small></div>
+  <div class="mt-card green"><a href="{% url 'admin:main_telegramuser_changelist' %}?holat=active"><b>{{ stats.users_active }}</b><span>Faol</span></a></div>
+  <div class="mt-card red"><a href="{% url 'admin:main_telegramuser_changelist' %}?holat=banned"><b>{{ stats.users_banned }}</b><span>Bloklangan</span></a></div>
+  <div class="mt-card gold"><a href="{% url 'admin:main_telegramuser_changelist' %}?is_admin__exact=1"><b>{{ stats.users_admin }}</b><span>Adminlar</span></a></div>
+  <div class="mt-card"><a href="{% url 'admin:main_test_changelist' %}"><b>{{ stats.tests_total }}</b><span>Testlar</span></a>
+    <small>{{ stats.tests_active }} faol · +{{ stats.tests_week }} 7 kunda</small></div>
+  <div class="mt-card green"><a href="{% url 'admin:main_testresult_changelist' %}"><b>{{ stats.results_total }}</b><span>Topshirilgan javoblar</span></a>
+    <small>+{{ stats.results_week }} 7 kunda · o'rtacha {{ stats.avg_percentage }}%</small></div>
+  <div class="mt-card gold"><a href="{% url 'admin:main_booktest_changelist' %}"><b>{{ stats.booktests_total }}</b><span>Kitob testlar</span></a>
+    <small>{{ stats.booktest_results }} ta natija</small></div>
+  <div class="mt-card"><a href="{% url 'admin:main_blocktest_changelist' %}"><b>{{ stats.blocktests_total }}</b><span>DTM (blok) testlar</span></a>
+    <small>{{ stats.blocktests_active }} faol · {{ stats.blocktest_results }} ta natija</small></div>
+  <div class="mt-card grey"><a href="{% url 'admin:main_subject_changelist' %}"><b>{{ stats.subjects_total }}</b><span>Fanlar</span></a></div>
+  <div class="mt-card grey"><b>{{ stats.balance_total|money }}</b><span>Jami balans (so'm)</span></div>
+</div>

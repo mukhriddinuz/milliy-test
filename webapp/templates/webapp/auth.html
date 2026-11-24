@@ -1,0 +1,32 @@
+{% extends "webapp/base.html" %}
+{% block content %}
+<div class="state">
+  <div class="icon-badge"><span class="spinner" style="width:32px;height:32px;border-top-color:var(--primary)"></span></div>
+  <h1 id="auth-title">Yuklanmoqda...</h1>
+  <p id="auth-text" class="muted">Biroz kuting, iltimos</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    var title = document.getElementById("auth-title"), text = document.getElementById("auth-text");
+    function toBot() {
+      title.textContent = "Bu sahifa faqat Telegram uchun";
+      text.textContent = "Telegram botga yo'naltirilmoqda...";
+      setTimeout(function () { location.href = "{% url 'webapp:bot' %}"; }, 1500);
+    }
+    function fail(msg) { title.textContent = "Kirishda xatolik"; text.textContent = msg || ""; }
+    if (!tg || !tg.initData) return toBot();
+
+    var fd = new FormData();
+    fd.append("init_data", tg.initData);
+    fd.append("next", "{{ next|escapejs }}");
+    fd.append("csrfmiddlewaretoken", "{{ csrf_token }}");
+    fetch("{% url 'webapp:auth' %}", { method: "POST", body: fd, credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { data.ok ? location.replace(data.next) : fail(data.error); })
+      .catch(function () { fail("Internet aloqasini tekshirib, sahifani qayta oching."); });
+  })();
+</script>
+{% endblock %}

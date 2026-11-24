@@ -1,0 +1,9 @@
+{% extends "admin/index.html" %}
+{% load admin_dashboard %}
+
+{% block content %}
+{% dashboard_stats as stats %}
+{% include "admin/_stat_cards.html" %}
+<p style="margin:-8px 0 20px"><a class="button" href="{% url 'admin:main_telegramuser_statistics' %}">📊 To'liq statistika</a></p>
+{{ block.super }}
+{% endblock %}

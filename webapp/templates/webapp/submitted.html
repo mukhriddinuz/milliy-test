@@ -1,0 +1,17 @@
+{% extends "webapp/base.html" %}
+{% block title %}Test yuborildi{% endblock %}
+{% block content %}
+{% include "webapp/_header.html" with title="Javoblar yuborildi" %}
+<div class="page fade-up">
+  <div class="card text-center">
+    <div class="icon-badge success"><i data-lucide="circle-check"></i></div>
+    <h2 class="text-xl font-bold mb-1">Test yuborildi!</h2>
+    <p class="muted mb-5">Javoblaringiz qabul qilindi. Natijangiz bot orqali yuboriladi.</p>
+    <div class="stats mb-5">
+      <div class="stat"><span class="muted">Test kodi</span><b>{{ test.pk }}</b></div>
+      <div class="stat"><span class="muted">Fan</span><b>{{ test.subject.name }}</b></div>
+    </div>
+    <a href="{% url 'webapp:home' %}" class="btn btn-primary">Bosh sahifaga</a>
+  </div>
+</div>
+{% endblock %}

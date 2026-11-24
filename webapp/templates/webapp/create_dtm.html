@@ -1,0 +1,75 @@
+{% extends "webapp/base.html" %}
+{% block title %}DTM test yaratish{% endblock %}
+{% block content %}
+{% url 'webapp:create_option' as back_url %}
+{% include "webapp/_header.html" with title="DTM test yaratish" subtitle="Blok test: 90 savol" back=back_url %}
+
+<form method="post" id="dtm-form" class="page stack" novalidate>
+  {% csrf_token %}
+  {% if errors %}
+    <div class="alert alert-error"><div class="space-y-1">{% for e in errors %}<p>{{ e }}</p>{% endfor %}</div></div>
+  {% endif %}
+
+  <div class="card stack">
+    <h2 class="section-title !mb-0">Asosiy fanlar</h2>
+    <div>
+      <label class="label" for="main1">Birinchi asosiy fan <span class="muted">(30 savol × 3.1 ball)</span></label>
+      <div><select id="main1" name="main_subject_1" class="field" required>
+          <option value="" disabled selected>Birinchi fanni tanlang</option>
+          {% for value, label in subjects %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div>
+      <label class="label" for="main2">Ikkinchi asosiy fan <span class="muted">(30 savol × 2.1 ball)</span></label>
+      <div><select id="main2" name="main_subject_2" class="field" required>
+          <option value="" disabled selected>Ikkinchi fanni tanlang</option>
+          {% for value, label in subjects %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select></div>
+      <p id="subject-error" class="error-text hidden">Ikkita asosiy fan bir xil bo'lishi mumkin emas!</p>
+    </div>
+  </div>
+
+  {% for b in blocks %}
+    <div>
+      <h2 class="section-title">
+        {% if b.main %}
+          <span class="main-title" data-for="{% if forloop.first %}main1{% else %}main2{% endif %}">{{ b.title }}</span>
+        {% else %}{{ b.title }}{% endif %}
+        <span class="pill muted ml-auto">{{ b.point }} ball{% if not b.main %} · majburiy{% endif %}</span>
+      </h2>
+      {% include "webapp/_choice_table.html" with rows=b.numbers options=choices prefix=b.key|add:"_" scores=False %}
+    </div>
+  {% endfor %}
+
+  <button type="submit" id="create-btn" disabled class="btn btn-primary">DTM testni yaratish</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var form = document.getElementById("dtm-form"), btn = document.getElementById("create-btn");
+    var main1 = document.getElementById("main1"), main2 = document.getElementById("main2");
+    var rows = Array.from(form.querySelectorAll("tr[data-question]"));
+    var defaults = {};
+    document.querySelectorAll(".main-title").forEach(function (el) { defaults[el.dataset.for] = el.textContent; });
+    function valid() {
+      if (!main1.value || !main2.value || main1.value === main2.value) return false;
+      return rows.every(function (r) { return r.querySelector("input:checked"); });
+    }
+    function refresh() {
+      document.querySelectorAll(".main-title").forEach(function (el) {
+        var sel = document.getElementById(el.dataset.for);
+        el.textContent = sel.value ? sel.options[sel.selectedIndex].text : defaults[el.dataset.for];
+      });
+      document.getElementById("subject-error").classList.toggle("hidden", !(main1.value && main1.value === main2.value));
+      btn.disabled = !valid();
+    }
+    form.addEventListener("change", refresh);
+    form.addEventListener("submit", function (e) {
+      if (!valid()) { e.preventDefault(); return; }
+      setLoading(btn);
+    });
+    refresh();
+  })();
+</script>
+{% endblock %}

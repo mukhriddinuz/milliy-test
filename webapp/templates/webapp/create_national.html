@@ -1,0 +1,239 @@
+{% extends "webapp/base.html" %}
+{% block title %}{% if booktest %}Kitob test yaratish{% else %}Test yaratish{% endif %}{% endblock %}
+{% block content %}
+{% if booktest %}{% url 'webapp:home' as back_url %}{% else %}{% url 'webapp:create_option' as back_url %}{% endif %}
+{% include "webapp/_header.html" with title=booktest|yesno:"Kitob test yaratish,Milliy sertifikat testi" subtitle="Yangi test" back=back_url %}
+
+<form method="post" id="create-form" class="page stack" novalidate>
+  {% csrf_token %}
+  {% if errors %}
+    <div class="alert alert-error"><div class="space-y-1">{% for e in errors %}<p>{{ e }}</p>{% endfor %}</div></div>
+  {% endif %}
+
+  <div class="card stack">
+    <h2 class="section-title !mb-0">Asosiy ma'lumotlar</h2>
+    <div>
+      <label class="label" for="subject">Fan</label>
+      <div><select id="subject" name="subject" class="field" required>
+          <option value="" disabled selected>Fanni tanlang</option>
+          {% for s in subjects %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+        </select></div>
+    </div>
+
+    {% if booktest %}
+    <div>
+      <label class="label" for="title">Test nomi</label>
+      <div><input id="title" name="title" type="text" maxlength="200" class="field" placeholder="Masalan: Ona tili, 5-variant" autocomplete="off"></div>
+    </div>
+    <label class="toggle"><span class="toggle-text">Kitobga chiqarilgan</span><input type="checkbox" name="book_test" class="switch" checked></label>
+    <label class="toggle"><span class="toggle-text">Qo'shimcha ball maydoni<small>Umumiy natija 2 ga bo'linadi</small></span><input type="checkbox" name="extra_ball" class="switch"></label>
+    <div class="flex items-center gap-2">
+      <span class="text-sm muted flex-1">Barcha savollarga ball</span>
+      <input id="all-scores" type="text" inputmode="decimal" value="1" class="field field-sm">
+      <button type="button" id="apply-scores" class="btn btn-secondary btn-sm">Qo'llash</button>
+    </div>
+    <input type="hidden" name="scores" id="scores" data-restore>
+    {% else %}
+    <label class="toggle"><span class="toggle-text">Test hammaga ko'rinsinmi?<small>Ochiq testlar ro'yxatida kanal bilan chiqadi</small></span>
+      <input type="checkbox" name="is_public" id="is_public" class="switch"></label>
+    <div id="public-fields" class="hidden stack">
+      <div>
+        <label class="label" for="channel">Test qaysi kanalda o'tkaziladi?</label>
+        <div><input id="channel" name="channel_username" type="text" value="@" placeholder="@username" class="field" autocomplete="off"></div>
+        <p id="channel-error" class="error-text hidden">Username kamida 1 belgidan iborat bo'lishi kerak</p>
+      </div>
+      <div>
+        <label class="label" for="start_time">Test qachon o'tkaziladi?</label>
+        <div><input id="start_time" name="start_time" type="datetime-local" class="field [color-scheme:dark]"></div>
+        <p id="date-error" class="error-text hidden">Test vaqti hozirgi vaqtdan keyin bo'lishi kerak</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div>
+    <h2 class="section-title">To'g'ri javoblarni belgilang</h2>
+    {% include "webapp/_choice_table.html" with rows=single_4 options=choices_4 prefix="q_" scores=booktest %}
+    {% include "webapp/_choice_table.html" with rows=single_6 options=choices_6 prefix="q_" scores=booktest %}
+  </div>
+
+  <div>
+    <h2 class="section-title">Yozma savollar</h2>
+    <input type="hidden" name="written" id="written" data-restore>
+    <div id="written-blocks" class="stack">
+      {% for n in written_blocks %}
+        <div class="written-block card" data-count="1">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <b class="mr-1"><span class="block-number">{{ n }}</span>-savol</b>
+              <button type="button" class="btn-plus btn btn-icon primary" aria-label="Qism qo'shish">+</button>
+              <button type="button" class="btn-minus btn btn-icon danger" aria-label="Qismni olib tashlash">−</button>
+            </div>
+            <div class="text-sm muted flex items-center gap-2">
+              {% if booktest %}<span>Ball</span><input type="text" inputmode="decimal" value="1" class="block-score field field-sm" autocomplete="off">{% endif %}
+              <span class="pill muted"><span class="block-count">1</span>&nbsp;qism</span>
+            </div>
+          </div>
+          <div class="parts mt-3 space-y-2"></div>
+          <p class="empty-note muted text-sm italic mt-3 hidden">Bu savol testga kiritilmaydi</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <button type="submit" id="create-btn" class="btn btn-primary" disabled>Testni yaratish</button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var MAX_PARTS = {{ written_max }};
+  var form = document.getElementById("create-form");
+  var container = document.getElementById("written-blocks");
+  var writtenInput = document.getElementById("written");
+  var BOOKTEST = {{ booktest|yesno:"true,false" }};
+  var isPublic = document.getElementById("is_public") || { checked: false };
+  var publicFields = document.getElementById("public-fields");
+  var channel = document.getElementById("channel") || { value: "" }, startTime = document.getElementById("start_time") || {};
+  var btn = document.getElementById("create-btn");
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+  var now = new Date();
+  if (startTime.tagName) startTime.min = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + "T" + pad(now.getHours()) + ":" + pad(now.getMinutes());
+
+  function partInput(value) {
+    var row = document.createElement("div");
+    row.className = "flex items-center gap-3";
+    row.innerHTML = '<span class="part-label w-6 text-sm font-semibold muted"></span>' +
+      '<input type="text" class="part field uppercase" placeholder="Javobni kiriting" autocomplete="off">';
+    row.querySelector("input").value = value || "";
+    return row;
+  }
+
+  function renderBlock(block, values) {
+    var parts = block.querySelector(".parts");
+    var count = values ? values.length : parseInt(block.dataset.count, 10);
+    var current = Array.from(parts.querySelectorAll("input.part")).map(function (i) { return i.value; });
+    values = values || current;
+    parts.innerHTML = "";
+    for (var i = 0; i < count; i++) parts.appendChild(partInput(values[i]));
+    parts.querySelectorAll(".part-label").forEach(function (l, i) { l.textContent = (i + 1) + ")"; });
+    block.dataset.count = count;
+    block.querySelector(".block-count").textContent = count;
+    block.querySelector(".empty-note").classList.toggle("hidden", count > 0);
+    block.querySelector(".btn-minus").disabled = count <= 0;
+    block.querySelector(".btn-plus").disabled = count >= MAX_PARTS;
+  }
+
+  function renumber() {
+    // Javobsiz (0 qismli) savollar oxiriga suriladi, qolganlari 36 dan boshlab raqamlanadi
+    var blocks = Array.from(container.querySelectorAll(".written-block"));
+    blocks.filter(function (b) { return b.dataset.count === "0"; }).forEach(function (b) { container.appendChild(b); });
+    Array.from(container.querySelectorAll(".written-block")).forEach(function (b, i) {
+      b.querySelector(".block-number").textContent = 36 + i;
+    });
+  }
+
+  function collectWritten() {
+    return Array.from(container.querySelectorAll(".written-block"))
+      .filter(function (b) { return b.dataset.count !== "0"; })
+      .map(function (b) {
+        return Array.from(b.querySelectorAll("input.part")).map(function (i) { return i.value.trim().toUpperCase(); });
+      });
+  }
+
+  function collectScores() {
+    var scores = [];
+    for (var n = 1; n <= 35; n++) scores.push(parseFloat((form.querySelector('input[name="s_' + n + '"]') || {}).value || "0"));
+    Array.from(container.querySelectorAll(".written-block")).filter(function (b) { return b.dataset.count !== "0"; })
+      .forEach(function (b) { scores.push(parseFloat(b.querySelector(".block-score").value || "0")); });
+    return scores.map(function (x) { return isNaN(x) ? 0 : x; });
+  }
+
+  function isValid() {
+    if (!form.subject.value) return false;
+    if (BOOKTEST) {
+      if (!document.getElementById("title").value.trim()) return false;
+      if (collectScores().some(function (x) { return !(x > 0); })) return false;
+    }
+    for (var n = 1; n <= 35; n++) if (!form.querySelector('input[name="q_' + n + '"]:checked')) return false;
+    var allParts = collectWritten();
+    if (allParts.some(function (b) { return b.some(function (v) { return !v; }); })) return false;
+    if (isPublic.checked) {
+      if (channel.value.length < 2) return false;
+      if (!startTime.value || new Date(startTime.value) <= new Date()) return false;
+    }
+    return true;
+  }
+
+  function refresh() {
+    var ok = isValid();
+    btn.disabled = !ok;
+    if (!BOOKTEST) {
+      publicFields.classList.toggle("hidden", !isPublic.checked);
+      document.getElementById("channel-error").classList.toggle("hidden", !(isPublic.checked && channel.value.length < 2));
+      document.getElementById("date-error").classList.toggle("hidden", !(isPublic.checked && startTime.value && new Date(startTime.value) <= new Date()));
+    }
+  }
+
+  container.addEventListener("click", function (e) {
+    var block = e.target.closest(".written-block");
+    if (!block) return;
+    var count = parseInt(block.dataset.count, 10);
+    if (e.target.closest(".btn-plus") && count < MAX_PARTS) {
+      if (count === 0) {
+        // Qaytadan yoqilgan savol oxirgi faol savoldan keyin turadi
+        var active = Array.from(container.querySelectorAll(".written-block")).filter(function (b) { return b !== block && b.dataset.count !== "0"; });
+        var last = active[active.length - 1];
+        if (last) last.after(block); else container.prepend(block);
+      }
+      block.dataset.count = count + 1; renderBlock(block);
+    } else if (e.target.closest(".btn-minus") && count > 0) {
+      block.dataset.count = count - 1; renderBlock(block);
+    }
+    renumber(); refresh();
+  });
+
+  if (channel.addEventListener) channel.addEventListener("input", function () {
+    var v = channel.value;
+    if (!v.startsWith("@")) v = "@" + v.replace(/^@*/, "");
+    channel.value = v; refresh();
+  });
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", refresh);
+
+  form.addEventListener("submit", function (e) {
+    if (!isValid()) { e.preventDefault(); return; }
+    writtenInput.value = JSON.stringify(collectWritten());
+    if (BOOKTEST) document.getElementById("scores").value = JSON.stringify(collectScores());
+    setLoading(btn);
+  });
+
+  // Boshlang'ich holat (server xato qaytargan bo'lsa yuborilgan yozma javoblarni tiklaymiz)
+  var initial = [];
+  try { initial = JSON.parse(writtenInput.value || "[]"); } catch (e) {}
+  Array.from(container.querySelectorAll(".written-block")).forEach(function (b, i) {
+    if (writtenInput.value) renderBlock(b, initial[i] || []);
+    else renderBlock(b);
+  });
+  if (BOOKTEST) {
+    document.getElementById("apply-scores").addEventListener("click", function () {
+      var v = document.getElementById("all-scores").value;
+      form.querySelectorAll("input.score, input.block-score").forEach(function (i) { i.value = v; });
+      refresh();
+    });
+    // Server xato qaytargan bo'lsa ballarni tiklash
+    try {
+      var saved = JSON.parse(document.getElementById("scores").value || "[]");
+      if (saved.length) {
+        for (var n = 1; n <= 35 && n <= saved.length; n++) form.querySelector('input[name="s_' + n + '"]').value = saved[n - 1];
+        Array.from(container.querySelectorAll(".written-block")).filter(function (b) { return b.dataset.count !== "0"; })
+          .forEach(function (b, i) { if (saved[35 + i] !== undefined) b.querySelector(".block-score").value = saved[35 + i]; });
+      }
+    } catch (e) {}
+  }
+  renumber(); refresh();
+})();
+</script>
+{% endblock %}
