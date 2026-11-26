@@ -11,7 +11,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -105,7 +107,24 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # Bir nechta jarayon bir vaqtda yozganda "database is locked" xatosi chiqmasligi uchun
+            'timeout': 20,
+            'transaction_mode': 'IMMEDIATE',
+        },
     }
+}
+
+# "bot_state" — bot suhbat holati (reklama, /register bosqichlari). Passenger bir nechta jarayonda
+# ishlaydi, shuning uchun holat xotirada emas, barcha jarayonlar ko'radigan fayl keshida saqlanadi.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    },
+    'bot_state': {
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': BASE_DIR / 'tmp' / 'bot_state',
+    },
 }
 
 
@@ -163,16 +182,20 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
     ],
+    # API faqat admin panel xodimlari (is_staff) uchun: admin panelga kirgan brauzer sessiyasi
+    # yoki Basic auth (login/parol) bilan. Oddiy foydalanuvchilar WebApp sahifalaridan foydalanadi.
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.BasicAuthentication",
-        "rest_framework.authentication.TokenAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAdminUser",
     ],
 }
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
-    "https://bot.milliy-test.uz",
-    "https://milliy-test.uz",
+    "https://milliysertifikat.nsdcorporation.uz",
     "http://localhost:5173",
     "https://web.telegram.org",
     "https://tg.dev",
@@ -183,8 +206,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = [
-    "https://bot.milliy-test.uz",
-    "https://milliy-test.uz",
+    "https://milliysertifikat.nsdcorporation.uz",
     "http://localhost:5173",
     "https://web.telegram.org",
     "https://tg.dev",
@@ -216,13 +238,59 @@ TELEGRAM_LOG_GROUP_ID = int(os.environ.get("TELEGRAM_LOG_GROUP_ID", "-1003772682
 TELEGRAM_LOG_TOPICS = {"users": 1, "tests": 1, "results": 1, "errors": 1, "logs": 1}
 
 # Bot tugmalari ochadigan WebApp manzili (Django sahifalari joylashgan domen)
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://milliy-test.uz").rstrip("/")
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://milliysertifikat.nsdcorporation.uz").rstrip("/")
 # Bot menyusidagi "Admin panel" tugmasi
-ADMIN_PANEL_URL = os.environ.get("ADMIN_PANEL_URL", "https://bot.milliy-test.uz/admin/")
+ADMIN_PANEL_URL = os.environ.get("ADMIN_PANEL_URL", "https://milliysertifikat.nsdcorporation.uz/admin/")
 # initData qancha vaqt amal qiladi (soniya)
 WEBAPP_INIT_DATA_MAX_AGE = 24 * 60 * 60
 # Faqat DEBUG rejimida: Telegram'siz brauzerda sinash uchun shu telegram_id bilan kirish
 WEBAPP_DEV_TELEGRAM_ID = os.environ.get("WEBAPP_DEV_TELEGRAM_ID")
+
+# WebApp domeni boshqa bo'lsa ham formalar CSRF tekshiruvidan o'tsin
+_webapp_origin = "{0.scheme}://{0.netloc}".format(urlparse(WEBAPP_URL))
+if _webapp_origin.startswith("https://") and _webapp_origin not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(_webapp_origin)
+# CSRF xatosida oddiy "403 Forbidden" o'rniga WebApp sahifasi (qayta kirish tugmasi bilan)
+CSRF_FAILURE_VIEW = "webapp.views.csrf_failure"
+
+# Sessiya bazada emas, imzolangan cookie'da (unda faqat Telegram ID va ism) — har bir kirish va
+# obuna tekshiruvida bazaga yozilmaydi, django_session jadvali o'smaydi
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+
+
+# ---------------------------------------------------------------------------
+# Xatolar jurnali (main/errorlog.py) — baza ishlatmaydi, logs/errors.json da saqlanadi
+# ---------------------------------------------------------------------------
+# /_errors/?key=<shu qiymat> manzilida xatolar matn ko'rinishida (bo'sh bo'lsa sahifa o'chiq)
+ERROR_LOG_KEY = os.environ.get("ERROR_LOG_KEY") or None
+ERROR_LOG_FILE = BASE_DIR / "logs" / "errors.json"
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    # Testlar paytidagi ataylab qilingan xatolar haqiqiy jurnalga tushmasin
+    import tempfile
+
+    ERROR_LOG_FILE = Path(tempfile.gettempdir()) / f"milliy-test-errors-{os.getpid()}.json"
+# Ixtiyoriy: har bir yangi xato uchun GitHub Issue (token — faqat shu repo, "Issues: write" ruxsati)
+GITHUB_ERRORS_TOKEN = os.environ.get("GITHUB_ERRORS_TOKEN") or None
+GITHUB_ERRORS_REPO = os.environ.get("GITHUB_ERRORS_REPO") or None
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        # Passenger/systemd jurnaliga faqat ogohlantirish va xatolar (INFO shovqini yozilmaydi)
+        "console": {"class": "logging.StreamHandler", "level": "WARNING", "formatter": "simple"},
+        "errors": {"class": "main.errorlog.ErrorCollector", "level": "ERROR"},
+    },
+    "root": {"handlers": ["console", "errors"], "level": "WARNING"},
+    "loggers": {
+        # Django o'zi ham root'ga uzatadi; 404 lar WARNING — xato ro'yxatiga tushmaydi
+        "django": {"level": "WARNING", "propagate": True},
+        "TeleBot": {"level": "ERROR", "propagate": True},
+    },
+}
 
 # Telegram Web (web.telegram.org) WebApp'ni iframe ichida ochadi, shuning uchun
 # productionda cookie'lar SameSite=None; Secure bo'lishi kerak

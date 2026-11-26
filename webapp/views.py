@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from main.bot import get_main_menu, user_send_message
@@ -41,6 +42,7 @@ def safe_next(request, url, default):
 # Autentifikatsiya
 # ---------------------------------------------------------------------------
 
+@csrf_exempt  # initData bot tokeni bilan imzolangan — CSRF cookie bo'lmasa ham (iframe, yangi sessiya) kira olsin
 @require_POST
 def auth(request):
     """Telegram initData'ni tekshiradi va sessiya ochadi."""
@@ -470,6 +472,19 @@ def booktest_created(request, slug):
         "code": test.slug, "title": f"Kitob testi: {test.title}", "qr": test.qr_code.url if test.qr_code else None,
         "link": test.qr_link(), "commands": [f"/kitobnatija_{test.slug}"], "nav": "create",
     })
+
+
+def csrf_failure(request, reason=""):
+    """CSRF xatosi (sahifa uzoq ochiq turgan, cookie o'chgan...) — tushunarli sahifa va qayta urinish."""
+    if request.path.startswith(("/admin", "/api")):
+        from django.views.csrf import csrf_failure as default_failure
+
+        return default_failure(request, reason)
+    response = render(request, "webapp/forbidden.html", {
+        "heading": "Sahifa eskirgan", "back_url": request.get_full_path(), "hide_nav": True,
+        "message": "Xavfsizlik tekshiruvidan o'tmadi. Sahifani qayta ochib, ma'lumotlarni yana yuboring.",
+    }, status=403)
+    return allow_telegram_frame(response)
 
 
 def bot_redirect(request):

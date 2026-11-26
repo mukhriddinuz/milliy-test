@@ -11,6 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .logger_send import log_to_telegram
+from .telegram_auth import validate_init_data
 from .models import BlockTest, BookTest, RequiredChannel, Subject, TelegramUser, Test
 from .serializers import (
     BlockTestResultResponseSerializer, BlockTestSerializer,
@@ -26,35 +27,61 @@ from .services import (
 )
 
 
-def decode_init_data(init_data: str):
+def _load_json(raw):
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
 
-    # 1. URL decode
-    decoded = urllib.parse.unquote(init_data)
 
-    # 2. Query stringni dict qilish
-    parsed = urllib.parse.parse_qs(decoded)
+def decode_init_data(init_data):
+    """Frontend yuborgan initData'dan foydalanuvchini oladi.
 
-    # 3. user JSON qismi query stringda emas, balki decodedning boshida turgan bo‘lishi mumkin
-    # uni ajratish uchun "}" belgisi qayerda tugashini topamiz
-    user_json_str = None
-    if decoded.startswith("{"):  # to‘g‘ridan-to‘g‘ri JSON bo‘lsa
-        end_index = decoded.find("}") + 1
-        user_json_str = decoded[:end_index]
-    else:
-        if "user" in parsed:
-            user_json_str = parsed["user"][0]
+    initData satri (query string), allaqachon decode qilingan satr yoki dict
+    (initDataUnsafe) ko'rinishida kelishi mumkin — hammasi qo'llab-quvvatlanadi.
+    """
+    if isinstance(init_data, dict):
+        user = init_data.get("user") if "user" in init_data else init_data
+        return {"user": user if isinstance(user, dict) else _load_json(user)}
+    if not isinstance(init_data, str) or not init_data.strip():
+        return {"user": None}
+    init_data = init_data.strip()
 
-    user_data = json.loads(user_json_str) if user_json_str else None
+    # Imzosi to'g'ri bo'lsa — eng ishonchli yo'l
+    verified = validate_init_data(init_data)
+    if verified:
+        return verified
 
+    if init_data.startswith(("{", "%7B", "%7b")):
+        data = _load_json(urllib.parse.unquote(init_data))
+        if isinstance(data, dict):
+            return decode_init_data(data)
+
+    # Bir marta decode qilinadi: "user" qiymati ichidagi &, =, + belgilari buzilmasligi uchun
+    # avval query stringni ajratamiz, keyin har bir qiymatni decode qilamiz
+    parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    lowered = init_data.lower()
+    if "user" not in parsed and ("%26" in lowered or "%3d" in lowered):
+        # Satr ikki marta kodlangan (encodeURIComponent(initData)) bo'lsa
+        parsed = dict(urllib.parse.parse_qsl(urllib.parse.unquote(init_data), keep_blank_values=True))
+    user = _load_json(parsed.get("user"))
     return {
-        "user": user_data,
-        "chat_instance": parsed.get("chat_instance", [None])[0],
-        "chat_type": parsed.get("chat_type", [None])[0],
-        "auth_date": parsed.get("auth_date", [None])[0],
-        "signature": parsed.get("signature", [None])[0],
-        "hash": parsed.get("hash", [None])[0],
+        "user": user if isinstance(user, dict) else None,
+        "chat_instance": parsed.get("chat_instance"),
+        "chat_type": parsed.get("chat_type"),
+        "auth_date": parsed.get("auth_date"),
+        "signature": parsed.get("signature"),
+        "hash": parsed.get("hash"),
     }
     
+
+def find_user(telegram_id):
+    """telegram_id bo'yicha foydalanuvchi; "undefined", "", None kabi qiymatlarda 500 emas, None qaytadi."""
+    try:
+        return TelegramUser.objects.filter(telegram_id=int(str(telegram_id).strip())).first()
+    except (TypeError, ValueError):
+        return None
+
 
 class TelegramUserViewSet(viewsets.ModelViewSet):
     """
@@ -95,7 +122,7 @@ class TelegramUserViewSet(viewsets.ModelViewSet):
     )
     def create(self, request, *args, **kwargs):
         """Eski tizimdagidek: telegram_id mavjud bo'lsa ma'lumotlar yangilanadi (upsert)."""
-        instance = TelegramUser.objects.filter(telegram_id=request.data.get("telegram_id")).first()
+        instance = find_user(request.data.get("telegram_id"))
         serializer = self.get_serializer(instance, data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -622,7 +649,7 @@ class TestViewSet(viewsets.ModelViewSet):
                 {'error': "Telegram foydalanuvchi ma'lumotlari (init_data) topilmadi"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        telegram_user = TelegramUser.objects.filter(telegram_id=user_data['id']).first()
+        telegram_user = find_user(user_data['id'])
         if telegram_user is None:
             return Response(
                 {'error': "Avval botda ro'yxatdan o'ting"},
@@ -784,7 +811,7 @@ class BookTestViewSet(viewsets.ModelViewSet):
         test = self.get_object()
         serializer = BookTestCheckAnswerSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = TelegramUser.objects.filter(telegram_id=serializer.validated_data["telegram_id"]).first()
+        user = find_user(serializer.validated_data["telegram_id"])
         if user is None:
             return Response({"error": "Foydalanuvchi topilmadi"}, status=status.HTTP_404_NOT_FOUND)
         try:
@@ -823,7 +850,7 @@ class BlockTestViewSet(viewsets.ModelViewSet):
         if not telegram_id or not isinstance(answer, dict) or not answer:
             return Response({"error": "telegram_id va answer maydonlari talab qilinadi"},
                             status=status.HTTP_400_BAD_REQUEST)
-        user = TelegramUser.objects.filter(telegram_id=telegram_id).first()
+        user = find_user(telegram_id)
         if user is None:
             return Response({"error": "Foydalanuvchi topilmadi"}, status=status.HTTP_404_NOT_FOUND)
         test = BlockTest.objects.create(creator=user, meta=answer)
@@ -851,7 +878,7 @@ class BlockTestViewSet(viewsets.ModelViewSet):
         telegram_id = data.get('telegram_id') or params.get('telegram_id')
         if not telegram_id:
             return Response({"error": "telegram_id kiritish majburiy"}, status=status.HTTP_400_BAD_REQUEST)
-        user = TelegramUser.objects.filter(telegram_id=telegram_id).first()
+        user = find_user(telegram_id)
         if user is None:
             return Response({"error": "Foydalanuvchi topilmadi"}, status=status.HTTP_400_BAD_REQUEST)
         try:

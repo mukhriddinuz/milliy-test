@@ -406,6 +406,9 @@ class ReklamaFlowTests(TestCase):
         self.assertEqual(fake_bot.copy_message.call_count, 4)
 
 
+@override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+                           "bot_state": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                                         "LOCATION": "bot-state-tests"}})
 class BotRegistrationTests(TestCase):
     """Bot ichida ro'yxatdan o'tish oqimi (Telegram API mock qilinadi)."""
 
@@ -430,6 +433,7 @@ class BotRegistrationTests(TestCase):
         from main import bot as botmod
         with mock.patch.object(botmod.bot, "send_message") as send, \
              mock.patch.object(botmod.bot, "edit_message_text"), mock.patch.object(botmod.bot, "delete_message"), \
+             mock.patch.object(botmod.bot, "answer_callback_query"), \
              mock.patch.object(botmod, "check_user_membership", return_value=(True, [])):
             send.return_value = mock.MagicMock(message_id=7)
             botmod.bot.threaded = False
@@ -439,4 +443,352 @@ class BotRegistrationTests(TestCase):
                 botmod.bot.process_new_updates([update])
         user = TelegramUser.objects.get(telegram_id=55)
         self.assertEqual((user.name, user.surname, user.phone, user.district), ("Ali", "Valiyev", "+998901112233", "Asaka"))
-        self.assertNotIn(55, botmod.user_data)
+        self.assertFalse(botmod.in_registration(55))
+
+
+BOT_STATE_LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+                    "bot_state": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                                  "LOCATION": "bot-state-tests-2"}}
+
+
+class MembershipCheckTests(TestCase):
+    """Majburiy obuna: bot tekshira olmagan kanal hammani to'sib qo'ymasligi kerak."""
+
+    def setUp(self):
+        from main.models import RequiredChannel
+        self.channel = RequiredChannel.objects.create(channel_id=-100123, channel_username="@kanal")
+
+    def check(self, side_effect=None, status="member", **member):
+        from main import bot as botmod
+        result = mock.MagicMock(status=status, **member)
+        with mock.patch.object(botmod.bot, "get_chat_member", side_effect=side_effect, return_value=result), \
+             mock.patch.object(botmod, "_channel_check_failed") as failed:
+            ok, not_joined = botmod.check_user_membership(5)
+        return ok, not_joined, failed
+
+    def api_error(self, description):
+        from telebot.apihelper import ApiTelegramException
+        return ApiTelegramException("getChatMember", None, {"error_code": 400, "description": description})
+
+    def test_member_and_left(self):
+        self.assertTrue(self.check(status="member")[0])
+        self.assertTrue(self.check(status="administrator")[0])
+        self.assertFalse(self.check(status="left")[0])
+        self.assertFalse(self.check(status="kicked")[0])
+
+    def test_restricted_member_counts(self):
+        self.assertTrue(self.check(status="restricted", is_member=True)[0])
+        self.assertFalse(self.check(status="restricted", is_member=False)[0])
+
+    def test_user_not_found_means_not_joined(self):
+        ok, not_joined, failed = self.check(side_effect=self.api_error("Bad Request: user not found"))
+        self.assertFalse(ok)
+        failed.assert_not_called()
+
+    def test_bot_not_admin_does_not_block_users(self):
+        ok, _, failed = self.check(side_effect=self.api_error("Bad Request: member list is inaccessible"))
+        self.assertTrue(ok)
+        failed.assert_called_once()
+
+
+class ReklamaDeliveryTests(TestCase):
+    def make(self, text, message_type="text"):
+        return Reklama.objects.create(admin_user_id=10, message_type=message_type, text=text, status="draft",
+                                      source_chat_id=10, source_message_id=5)
+
+    def test_plain_message_is_copied(self):
+        from main.reklama import deliver
+        bot = mock.MagicMock()
+        deliver(bot, self.make("<b>Salom</b>"), 7)
+        bot.copy_message.assert_called_once()
+        self.assertNotIn("caption", bot.copy_message.call_args.kwargs)
+        bot.send_message.assert_not_called()
+
+    def test_markup_text_is_sent_parsed(self):
+        from main.reklama import deliver
+        bot = mock.MagicMock()
+        deliver(bot, self.make("Salom [[sayt](https://a.uz)]\n[[Kanal|https://t.me/x?a=1&amp;b=2]]"), 7)
+        bot.copy_message.assert_not_called()
+        args, kwargs = bot.send_message.call_args
+        self.assertEqual(args[1], 'Salom <a href="https://a.uz">sayt</a>')
+        button = kwargs["reply_markup"].keyboard[0][0]
+        self.assertEqual(button.url, "https://t.me/x?a=1&b=2")
+
+    def test_markup_caption_overrides_copy(self):
+        from main.reklama import deliver
+        bot = mock.MagicMock()
+        deliver(bot, self.make("Rasm [[Kanal|https://t.me/x]]", "image"), 7)
+        self.assertEqual(bot.copy_message.call_args.kwargs["caption"], "Rasm")
+
+    def test_blocked_user_marked_inactive(self):
+        from telebot.apihelper import ApiTelegramException
+        from main.reklama import send_reklama
+        user = TelegramUser.objects.create(telegram_id=99, name="U", surname="S", phone="+998901234567",
+                                           region="Toshkent", district="Chinoz")
+        bot = mock.MagicMock()
+        bot.copy_message.side_effect = ApiTelegramException(
+            "copyMessage", None, {"error_code": 403, "description": "Forbidden: bot was blocked by the user"})
+        self.assertFalse(send_reklama(bot, self.make("x"), user))
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    def test_rate_limit_retried(self):
+        from telebot.apihelper import ApiTelegramException
+        from main.reklama import send_reklama
+        user = TelegramUser.objects.create(telegram_id=98, name="U", surname="S", phone="+998901234567",
+                                           region="Toshkent", district="Chinoz")
+        bot = mock.MagicMock()
+        bot.copy_message.side_effect = [ApiTelegramException(
+            "copyMessage", None, {"error_code": 429, "description": "Too Many Requests",
+                                  "parameters": {"retry_after": 1}}), None]
+        with mock.patch("main.reklama.time.sleep"):
+            self.assertTrue(send_reklama(bot, self.make("x"), user))
+        self.assertEqual(bot.copy_message.call_count, 2)
+
+
+@override_settings(CACHES=BOT_STATE_LOCMEM)
+class ReklamaCommandRecoveryTests(TestCase):
+    def test_stuck_sending_is_resumed(self):
+        from django.core.management import call_command
+        TelegramUser.objects.create(telegram_id=1, name="U", surname="S", phone="+998901234567",
+                                    region="Toshkent", district="Chinoz")
+        r = Reklama.objects.create(admin_user_id=10, message_type="text", text="x", status="sending",
+                                   source_chat_id=10, source_message_id=5, total_users=1)
+        fake_bot = mock.MagicMock()
+        fake_bot.send_message.return_value.message_id = 77
+        with mock.patch("main.management.commands.send_reklama.telebot.TeleBot", return_value=fake_bot), \
+             mock.patch("main.management.commands.send_reklama.time.sleep"):
+            call_command("send_reklama", "--loop")
+        r.refresh_from_db()
+        self.assertEqual((r.status, r.sent_count), ("completed", 1))
+
+    def test_second_process_does_not_run_while_locked(self):
+        from django.core.management import call_command
+        from main.state import acquire_lock, release_lock
+        Reklama.objects.create(admin_user_id=10, message_type="text", text="x", status="ready",
+                               source_chat_id=10, source_message_id=5)
+        self.assertTrue(acquire_lock("send_reklama", 60))
+        try:
+            with mock.patch("main.management.commands.send_reklama.telebot.TeleBot") as tb:
+                call_command("send_reklama")
+                tb.assert_not_called()
+        finally:
+            release_lock("send_reklama")
+
+
+@override_settings(TELEGRAM_BOT_TOKEN=TOKEN)
+class LegacyInitDataTests(TestCase):
+    def test_signed(self):
+        from main.views import decode_init_data
+        self.assertEqual(decode_init_data(init_data(42))["user"]["id"], 42)
+
+    def test_unsigned_with_special_chars(self):
+        from urllib.parse import quote, urlencode
+        from main.views import decode_init_data
+        raw = urlencode({"user": json.dumps({"id": 7, "first_name": "A&B=C+D"}), "auth_date": "1", "hash": "x"})
+        self.assertEqual(decode_init_data(raw)["user"]["first_name"], "A&B=C+D")
+        self.assertEqual(decode_init_data(quote(raw))["user"]["id"], 7)
+
+    def test_dict_and_garbage(self):
+        from main.views import decode_init_data, find_user
+        self.assertEqual(decode_init_data({"user": {"id": 3}})["user"]["id"], 3)
+        self.assertIsNone(decode_init_data("")["user"])
+        self.assertIsNone(decode_init_data("user=%7Bbad")["user"])
+        self.assertIsNone(find_user("undefined"))
+
+
+@override_settings(TELEGRAM_BOT_TOKEN=TOKEN, WEBAPP_DEV_TELEGRAM_ID=None)
+class WebAppRobustnessTests(TestCase):
+    def test_auth_works_without_csrf_cookie(self):
+        from django.test import Client
+        client = Client(enforce_csrf_checks=True)
+        r = client.post(reverse("webapp:auth"), {"init_data": init_data(5), "next": "/"})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+
+    def test_phone_normalized(self):
+        from webapp.forms import RegisterForm
+        base = {"name": "A", "surname": "B", "father_name": "C", "region": "Andijon", "district": "Asaka"}
+        for raw in ["+998 90 123-45-67", "998901234567", "901234567"]:
+            form = RegisterForm({**base, "phone": raw})
+            self.assertTrue(form.is_valid(), form.errors)
+            self.assertEqual(form.cleaned_data["phone"], "+998901234567")
+        self.assertFalse(RegisterForm({**base, "phone": "+99890"}).is_valid())
+
+    def test_csrf_failure_page(self):
+        from django.test import Client
+        client = Client(enforce_csrf_checks=True)
+        r = client.post(reverse("webapp:register"), {})
+        self.assertEqual(r.status_code, 403)
+        self.assertContains(r, "Sahifa eskirgan", status_code=403)
+
+
+@override_settings(TELEGRAM_BOT_TOKEN=TOKEN, WEBAPP_DEV_TELEGRAM_ID=None, MEDIA_ROOT=TEST_MEDIA)
+class WebAppSubscriptionTests(TestCase):
+    """Majburiy kanaldan chiqqan foydalanuvchi WebApp'ni umuman ishlata olmaydi."""
+
+    def setUp(self):
+        from main.models import RequiredChannel
+        RequiredChannel.objects.create(channel_id=-100555, channel_username="@majburiy")
+        TelegramUser.objects.create(telegram_id=111, name="Ali", surname="V", father_name="X",
+                                    phone="+998901234567", region="Toshkent", district="Chinoz")
+        self.client.post(reverse("webapp:auth"), {"init_data": init_data(111), "next": "/"})
+
+    def member(self, status):
+        from main import bot as botmod
+        return mock.patch.object(botmod.bot, "get_chat_member", return_value=mock.MagicMock(status=status))
+
+    def test_not_subscribed_blocked_everywhere(self):
+        with self.member("left"):
+            for name in ["webapp:home", "webapp:profile", "webapp:send_test", "webapp:dtm", "webapp:register"]:
+                r = self.client.get(reverse(name))
+                self.assertEqual(r.status_code, 403, name)
+                self.assertTemplateUsed(r, "webapp/subscribe.html")
+                self.assertContains(r, "https://t.me/majburiy", status_code=403)
+
+    def test_subscribed_allowed(self):
+        with self.member("member"):
+            self.assertEqual(self.client.get(reverse("webapp:home")).status_code, 200)
+
+    def test_leaving_channel_blocks_post_immediately(self):
+        with self.member("member"):
+            self.assertEqual(self.client.get(reverse("webapp:home")).status_code, 200)
+        with self.member("left"):
+            # sahifa ochish 1 daqiqa eslab qolinadi, lekin ma'lumot yuborish darhol to'xtatiladi
+            r = self.client.post(reverse("webapp:register"), {"name": "X"})
+            self.assertEqual(r.status_code, 403)
+            self.assertTemplateUsed(r, "webapp/subscribe.html")
+            # keyingi sahifa ham endi bloklangan (eslab qolingan natija o'chirildi)
+            self.assertEqual(self.client.get(reverse("webapp:home")).status_code, 403)
+
+    def test_recheck_after_cache_expires(self):
+        with self.member("member"):
+            self.client.get(reverse("webapp:home"))
+        session = self.client.session
+        session["tg_subscribed_until"] = 0
+        session.save()
+        from django.conf import settings as dj_settings
+        self.client.cookies[dj_settings.SESSION_COOKIE_NAME] = session.session_key  # cookie sessiya
+        with self.member("left"):
+            self.assertEqual(self.client.get(reverse("webapp:home")).status_code, 403)
+
+
+class ApiClosedTests(TestCase):
+    def test_anonymous_rejected(self):
+        TelegramUser.objects.create(telegram_id=1, name="A", surname="B", phone="+998901234567",
+                                    region="Toshkent", district="Chinoz")
+        for method, url in [("get", "/api/users/"), ("get", "/api/users/1/"), ("delete", "/api/users/1/"),
+                            ("post", "/api/users/"), ("get", "/api/tests/"), ("get", "/swagger/")]:
+            r = getattr(self.client, method)(url)
+            self.assertIn(r.status_code, (401, 403), f"{method} {url}")
+        self.assertTrue(TelegramUser.objects.filter(telegram_id=1).exists())
+
+    def test_staff_allowed(self):
+        from django.contrib.auth.models import User
+        User.objects.create_superuser("admin", "a@a.uz", "parol12345")
+        self.client.login(username="admin", password="parol12345")
+        self.assertEqual(self.client.get("/api/users/").status_code, 200)
+
+
+class ErrorLogTests(TestCase):
+    def setUp(self):
+        from main import errorlog
+        self.errorlog = errorlog
+        self.path = TEST_MEDIA + "/errors.json"
+        self.override = override_settings(ERROR_LOG_FILE=self.path, ERROR_LOG_KEY="maxfiy-kalit-123",
+                                          GITHUB_ERRORS_TOKEN=None)
+        self.override.enable()
+        errorlog.clear_errors()
+        errorlog._last_write.clear()
+        errorlog._pending.clear()
+
+    def tearDown(self):
+        self.override.disable()
+
+    def raise_and_log(self, msg="boom"):
+        import logging
+        try:
+            {}["yoq"]
+        except KeyError:
+            logging.getLogger("main.test").exception(msg)
+
+    def test_sanitize(self):
+        s = self.errorlog.sanitize("tel +998 90 123 45 67, id 5021533207, a@b.uz, 123456:" + "A" * 35)
+        for leaked in ["5021533207", "a@b.uz", "AAAA", "123 45 67"]:
+            self.assertNotIn(leaked, s)
+
+    def test_duplicates_grouped(self):
+        self.raise_and_log()
+        self.errorlog._last_write.clear()  # yozish oralig'ini kutmaslik uchun
+        self.raise_and_log()
+        data = self.errorlog.load_errors()
+        self.assertEqual(len(data), 1)
+        entry = next(iter(data.values()))
+        self.assertEqual((entry["type"], entry["count"]), ("KeyError", 2))
+        self.assertIn("webapp/tests.py", entry["location"])
+
+    def test_storm_is_throttled(self):
+        for _ in range(50):
+            self.raise_and_log()
+        self.assertEqual(next(iter(self.errorlog.load_errors().values()))["count"], 1)  # qolgani keyin yoziladi
+        self.errorlog._last_write.clear()
+        self.raise_and_log()
+        self.assertEqual(next(iter(self.errorlog.load_errors().values()))["count"], 51)
+
+    def test_endpoint_requires_key(self):
+        self.raise_and_log()
+        self.assertEqual(self.client.get("/_errors/").status_code, 404)
+        self.assertEqual(self.client.get("/_errors/?key=notogri").status_code, 404)
+        r = self.client.get("/_errors/?key=maxfiy-kalit-123&text=1")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "KeyError")
+
+    def test_api(self):
+        self.raise_and_log()
+        self.assertEqual(self.client.get("/api/errors/").status_code, 404)
+        r = self.client.get("/api/errors/", HTTP_AUTHORIZATION="Bearer maxfiy-kalit-123")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["total_kinds"], 1)
+        fp = body["errors"][0]["fingerprint"]
+        self.assertIn("KeyError", body["errors"][0]["traceback"])
+        # bitta xato, keyin "tuzatildi" deb o'chirish
+        self.assertEqual(self.client.get(f"/api/errors/{fp}/?key=maxfiy-kalit-123").json()["type"], "KeyError")
+        self.assertEqual(self.client.delete(f"/api/errors/{fp}/", HTTP_X_ERROR_LOG_KEY="maxfiy-kalit-123")
+                         .json()["removed"], 1)
+        self.assertEqual(self.client.get("/api/errors/?key=maxfiy-kalit-123").json()["total_kinds"], 0)
+        # since: kelajakdagi vaqt — hech narsa qaytmaydi
+        self.raise_and_log()
+        self.assertEqual(self.client.get("/api/errors/?key=maxfiy-kalit-123&since=9999999999").json()["returned"], 0)
+
+    def test_api_disabled_without_key_setting(self):
+        with override_settings(ERROR_LOG_KEY=None):
+            self.assertEqual(self.client.get("/api/errors/?key=").status_code, 404)
+
+    def test_bot_handler_exception_is_logged(self):
+        from main import bot as botmod
+        try:
+            raise ValueError("handler buzildi")
+        except ValueError as e:
+            botmod._LogHandlerErrors().handle(e)
+        self.assertTrue(any(e["type"] == "ValueError" for e in self.errorlog.load_errors().values()))
+
+    def test_clear(self):
+        self.raise_and_log()
+        self.assertEqual(self.errorlog.clear_errors(), 1)
+        self.assertEqual(self.errorlog.load_errors(), {})
+
+
+class CleanupTests(TestCase):
+    def test_finished_reklama_rows_removed(self):
+        from django.core.management import call_command
+        u = TelegramUser.objects.create(telegram_id=1, name="U", surname="S", phone="+998901234567",
+                                        region="Toshkent", district="Chinoz")
+        done = Reklama.objects.create(admin_user_id=1, message_type="text", text="x", status="completed")
+        active = Reklama.objects.create(admin_user_id=1, message_type="text", text="y", status="pending")
+        done.sending_users.add(u)
+        active.sending_users.add(u)
+        call_command("cleanup")
+        self.assertEqual(done.sending_users.count(), 0)
+        self.assertEqual(active.sending_users.count(), 1)  # yuborilayotganga tegmaydi
+        self.assertTrue(TelegramUser.objects.filter(pk=u.pk).exists())

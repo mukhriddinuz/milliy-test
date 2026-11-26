@@ -1,7 +1,10 @@
 """Muhim hodisalarni Telegram log guruhiga yuborish (TELEGRAM_LOG_GROUP_ID)."""
+import logging
 from html import escape
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
@@ -65,4 +68,4 @@ def log_to_telegram(topic: str, text: str, request=None, user=None):
 
         bot.send_message(chat_id=group_id, message_thread_id=topic_id, text=full_text[:4096], parse_mode="HTML")
     except Exception as e:
-        print(f"Telegram log error (topic: {topic}): {e}")
+        logger.warning(f"Telegram log guruhiga yuborilmadi (topic: {topic}): {e}")

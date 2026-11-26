@@ -3,6 +3,7 @@
 Telegram ichida ochilgan sahifa initData'ni /auth/ ga yuboradi, server imzoni tekshirib
 sessiyaga yozadi. Keyingi so'rovlarda foydalanuvchi sessiyadan olinadi.
 """
+import time
 from functools import wraps
 
 from django.conf import settings
@@ -13,6 +14,8 @@ from django.utils.http import urlencode
 from main.models import TelegramUser
 
 SESSION_KEY = "tg"
+SUBSCRIPTION_KEY = "tg_subscribed_until"
+SUBSCRIPTION_RECHECK = 60  # soniya
 
 # Telegram Web (web.telegram.org) sahifani iframe ichida ochadi
 FRAME_ANCESTORS = "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
@@ -20,6 +23,7 @@ FRAME_ANCESTORS = "frame-ancestors 'self' https://web.telegram.org https://*.tel
 
 def login_telegram(request, tg_user):
     request.session.cycle_key()
+    request.session.pop(SUBSCRIPTION_KEY, None)  # boshqa akkauntning obuna natijasi o'tib ketmasin
     request.session[SESSION_KEY] = {
         "id": int(tg_user["id"]),
         "first_name": tg_user.get("first_name", ""),
@@ -39,6 +43,26 @@ def get_telegram(request):
         login_telegram(request, {"id": int(dev_id), "first_name": "Dev"})
         return request.session[SESSION_KEY]
     return None
+
+
+def subscription_missing(request):
+    """Majburiy kanallardan obuna bo'linmaganlari ro'yxati ([] — hammasiga a'zo).
+
+    Kanaldan chiqqan foydalanuvchi WebApp'ni ishlata olmaydi. Sahifa ochishda (GET) muvaffaqiyatli
+    natija SUBSCRIPTION_RECHECK soniya eslab qolinadi (har sahifada Telegram'ga so'rov yubormaslik
+    uchun), ma'lumot yuborishda (POST) esa har doim qaytadan tekshiriladi.
+    """
+    from main.bot import channel_link, check_user_membership
+
+    now = time.time()
+    if request.method == "GET" and request.session.get(SUBSCRIPTION_KEY, 0) > now:
+        return []
+    is_member, not_joined = check_user_membership(request.tg["id"])
+    if is_member:
+        request.session[SUBSCRIPTION_KEY] = now + SUBSCRIPTION_RECHECK
+        return []
+    request.session.pop(SUBSCRIPTION_KEY, None)
+    return [{"title": ch.channel_username or "Kanal", "url": channel_link(ch)} for ch in not_joined]
 
 
 def allow_telegram_frame(response):
@@ -63,6 +87,11 @@ def telegram_page(require_registration=False):
 
             if request.tg_user and request.tg_user.is_banned:
                 return allow_telegram_frame(render(request, "webapp/banned.html", {"hide_nav": True}, status=403))
+            not_joined = subscription_missing(request)
+            if not_joined:
+                return allow_telegram_frame(render(request, "webapp/subscribe.html", {
+                    "channels": not_joined, "hide_nav": True,
+                }, status=403))
             if require_registration and request.tg_user is None:
                 url = reverse("webapp:register") + "?" + urlencode({"next": request.get_full_path()})
                 return allow_telegram_frame(redirect(url))

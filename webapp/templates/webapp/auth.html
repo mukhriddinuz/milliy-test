@@ -4,6 +4,7 @@
   <div class="icon-badge"><span class="spinner" style="width:32px;height:32px;border-top-color:var(--primary)"></span></div>
   <h1 id="auth-title">Yuklanmoqda...</h1>
   <p id="auth-text" class="muted">Biroz kuting, iltimos</p>
+  <button id="auth-retry" type="button" class="btn btn-secondary max-w-xs mt-6" hidden>Qayta urinish</button>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -11,22 +12,75 @@
   (function () {
     var tg = window.Telegram && window.Telegram.WebApp;
     var title = document.getElementById("auth-title"), text = document.getElementById("auth-text");
+    var retry = document.getElementById("auth-retry");
+    var next = "{{ next|escapejs }}";
+
     function toBot() {
       title.textContent = "Bu sahifa faqat Telegram uchun";
       text.textContent = "Telegram botga yo'naltirilmoqda...";
       setTimeout(function () { location.href = "{% url 'webapp:bot' %}"; }, 1500);
     }
-    function fail(msg) { title.textContent = "Kirishda xatolik"; text.textContent = msg || ""; }
-    if (!tg || !tg.initData) return toBot();
+    function fail(msg) {
+      title.textContent = "Kirishda xatolik";
+      text.textContent = msg || "";
+      retry.hidden = false;
+    }
 
-    var fd = new FormData();
-    fd.append("init_data", tg.initData);
-    fd.append("next", "{{ next|escapejs }}");
-    fd.append("csrfmiddlewaretoken", "{{ csrf_token }}");
-    fetch("{% url 'webapp:auth' %}", { method: "POST", body: fd, credentials: "same-origin" })
-      .then(function (r) { return r.json(); })
-      .then(function (data) { data.ok ? location.replace(data.next) : fail(data.error); })
-      .catch(function () { fail("Internet aloqasini tekshirib, sahifani qayta oching."); });
+    // initData: avval Telegram skriptidan, u yuklanmagan bo'lsa (sekin internet, bloklangan
+    // telegram.org) — Telegram sahifa manziliga qo'shadigan #tgWebAppData=... dan olamiz
+    function readInitData() {
+      if (tg && tg.initData) return tg.initData;
+      var hash = location.hash.replace(/^#/, "");
+      if (!hash) return "";
+      try {
+        var params = new URLSearchParams(hash);
+        var raw = params.get("tgWebAppData") || "";
+        if (raw) { try { sessionStorage.setItem("tg-init-data", raw); } catch (e) {} }
+        return raw;
+      } catch (e) { return ""; }
+    }
+    var initData = readInitData();
+    if (!initData) { try { initData = sessionStorage.getItem("tg-init-data") || ""; } catch (e) {} }
+    if (!initData) return toBot();
+
+    // Cookie saqlanmasa (masalan, brauzer iframe cookie'larini bloklasa) auth -> sahifa -> auth
+    // cheksiz aylanadi. Buni sezib, foydalanuvchiga tushunarli xabar beramiz.
+    var loopKey = "tg-auth-loop";
+    var attempts = 0;
+    try { attempts = parseInt(sessionStorage.getItem(loopKey) || "0", 10); } catch (e) {}
+    if (attempts >= 3) {
+      try { sessionStorage.removeItem(loopKey); } catch (e) {}
+      return fail("Brauzer cookie'larni saqlamayapti. Iltimos, sahifani Telegram ilovasi (telefon yoki "
+                  + "kompyuter dasturi) orqali oching.");
+    }
+
+    function login() {
+      retry.hidden = true;
+      title.textContent = "Yuklanmoqda...";
+      text.textContent = "Biroz kuting, iltimos";
+      var fd = new FormData();
+      fd.append("init_data", initData);
+      fd.append("next", next);
+      fetch("{% url 'webapp:auth' %}", { method: "POST", body: fd, credentials: "same-origin" })
+        .then(function (r) {
+          return r.json().catch(function () { throw new Error("server " + r.status); });
+        })
+        .then(function (data) {
+          if (data.ok) {
+            try { sessionStorage.setItem(loopKey, String(attempts + 1)); } catch (e) {}
+            location.replace(data.next);
+          } else {
+            fail(data.error);
+          }
+        })
+        .catch(function (e) {
+          fail(String(e && e.message || "").indexOf("server") === 0
+            ? "Serverda vaqtinchalik xatolik. Birozdan so'ng qayta urinib ko'ring."
+            : "Internet aloqasini tekshirib, qayta urinib ko'ring.");
+        });
+    }
+    retry.addEventListener("click", login);
+    login();
   })();
 </script>
 {% endblock %}

@@ -1,3 +1,4 @@
+import html
 import io
 import re
 from typing import Dict, List, Tuple
@@ -187,7 +188,8 @@ def parse_reklama_text(raw_text: str) -> Tuple[str, List[Dict]]:
     buttons = []
 
     def button_replacer(match):
-        buttons.append({"text": match.group(1).strip(), "url": match.group(2).strip()})
+        # Matn HTML ko'rinishida saqlanadi (&amp; va h.k.) — tugma esa oddiy matn bo'lishi kerak
+        buttons.append({"text": html.unescape(match.group(1).strip()), "url": html.unescape(match.group(2).strip())})
         return ""
 
     text_without_buttons = BUTTON_PATTERN.sub(button_replacer, raw_text or "")

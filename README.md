@@ -1,7 +1,7 @@
 # Milliy Test — Telegram bot va WebApp
 
 Milliy sertifikat, DTM (blok) va kitob testlarini yaratish, topshirish va natijalarni hisoblash uchun
-Django loyihasi: Telegram bot, Telegram WebApp sahifalari, REST API va admin panel.
+Django loyihasi: Telegram bot, Telegram WebApp sahifalari, REST API (faqat adminlar uchun) va admin panel.
 
 ## Tuzilishi
 
@@ -39,7 +39,25 @@ Testlar: `./venv/bin/python manage.py test`
    ```
    * * * * * cd /loyiha/yoli && venv/bin/python manage.py send_reklama
    ```
-5. Webhook: `https://<domen>/webhook/` (ixtiyoriy `TELEGRAM_WEBHOOK_SECRET` bilan).
+5. Bazani ixcham saqlash uchun oyiga bir marta (foydalanuvchi ma'lumotlariga tegmaydi):
+   ```
+   0 4 1 * * cd /loyiha/yoli && venv/bin/python manage.py cleanup --vacuum
+   ```
+6. Webhook: `https://<domen>/webhook/` (ixtiyoriy `TELEGRAM_WEBHOOK_SECRET` bilan).
+
+## Xatolarni kuzatish
+
+Barcha xatolar (500, bot handlerlari, cron) `logs/errors.json` ga yig'iladi — bir xil xato bitta yozuv
+bo'lib, faqat soni oshadi. Baza ishlatilmaydi. Ko'rish usullari:
+
+- `python manage.py errors` (tozalash: `--clear` yoki `--clear <fingerprint>`)
+- **API** (`ERROR_LOG_KEY` kaliti bilan, admin login kerak emas):
+  - `GET /api/errors/?key=<kalit>` — xatolar ro'yxati (JSON; `&text=1` — oddiy matn, `&since=<unix>`, `&limit=`)
+  - `GET /api/errors/<fingerprint>/?key=<kalit>` — bitta xato to'liq traceback bilan
+  - `DELETE /api/errors/<fingerprint>/` — tuzatilgan xatoni o'chirish (`Authorization: Bearer <kalit>`)
+  - Javobda `code_version` — serverdagi kod qaysi commit'da ekani.
+- `GITHUB_ERRORS_TOKEN` berilsa — har bir yangi xato uchun `auto-error` belgili GitHub Issue.
+  Telefon, Telegram ID, token va email yashiriladi. Issue yopilgach xato qaytsa, u qayta ochiladi.
 
 ## Bot buyruqlari
 

@@ -26,15 +26,19 @@ class RegisterForm(forms.Form):
     name = forms.CharField(label="Ism", max_length=100)
     surname = forms.CharField(label="Familiya", max_length=100)
     father_name = forms.CharField(label="Sharif", max_length=100)
-    phone = forms.RegexField(
-        label="Telefon raqam", regex=r"^\+998\d{9}$",
-        error_messages={"invalid": "Telefon raqami to'liq kiritilishi kerak (+998XXXXXXXXX)"},
-    )
+    phone = forms.CharField(label="Telefon raqam", max_length=30)
     region = forms.ChoiceField(label="Viloyat", choices=[("", "Viloyatni tanlang")] + [(r, r) for r in REGIONS])
     district = forms.CharField(label="Tuman", max_length=100)
 
     def clean_phone(self):
-        return re.sub(r"[^\d+]", "", self.cleaned_data["phone"])
+        # "+998 90 123-45-67", "998901234567", "901234567" — hammasi +998901234567 ko'rinishiga keltiriladi
+        digits = re.sub(r"\D", "", self.cleaned_data["phone"])
+        if len(digits) == 9:
+            digits = "998" + digits
+        phone = "+" + digits
+        if not re.fullmatch(r"\+998\d{9}", phone):
+            raise forms.ValidationError("Telefon raqami to'liq kiritilishi kerak (+998XXXXXXXXX)")
+        return phone
 
     def clean(self):
         data = super().clean()

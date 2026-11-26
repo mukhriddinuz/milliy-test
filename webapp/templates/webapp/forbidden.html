@@ -2,8 +2,9 @@
 {% block content %}
 <div class="state">
   <div class="icon-badge"><i data-lucide="lock"></i></div>
-  <h1>Ruxsat yo‘q</h1>
+  <h1>{{ heading|default:"Ruxsat yo‘q" }}</h1>
   <p class="muted mb-6">{{ message|default:"Bu bo‘lim faqat adminlar uchun." }}</p>
-  <a href="{% url 'webapp:home' %}" class="btn btn-secondary max-w-xs">Bosh sahifaga</a>
+  {% if back_url %}<a href="{{ back_url }}" class="btn btn-secondary max-w-xs">Qayta urinish</a>
+  {% else %}<a href="{% url 'webapp:home' %}" class="btn btn-secondary max-w-xs">Bosh sahifaga</a>{% endif %}
 </div>
 {% endblock %}

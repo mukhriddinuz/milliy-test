@@ -6,6 +6,7 @@ Serverda cron orqali har daqiqada ishga tushiriladi:
 Har ishga tushganda keyingi 100 kishiga yuboradi; hammaga yetganda reklama "completed" bo'ladi.
 --loop bilan barcha partiyalarni ketma-ket yuboradi (cron bo'lmasa qo'lda ishlatish uchun).
 """
+import logging
 import time
 
 import telebot
@@ -16,8 +17,14 @@ from django.utils import timezone
 
 from main.models import Reklama, TelegramUser
 from main.reklama import send_reklama
+from main.state import acquire_lock, refresh_lock, release_lock
+
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
+LOCK_NAME = "send_reklama"
+# Qulf shu vaqtdan keyin o'z-o'zidan ochiladi (jarayon o'lib qolgan bo'lsa ham reklama to'xtab qolmaydi)
+LOCK_TIMEOUT = 15 * 60
 
 
 def progress_text(reklama, finished=False):
@@ -37,9 +44,23 @@ class Command(BaseCommand):
         parser.add_argument("--delay", type=float, default=0.5, help="Har bir xabar orasidagi pauza (soniya)")
 
     def handle(self, *args, **options):
-        bot = telebot.TeleBot(settings.TELEGRAM_BOT_TOKEN or "0:not-configured", parse_mode="HTML")
-        while self.send_batch(bot, options["delay"]) and options["loop"]:
-            pass
+        # Navbat bo'sh bo'lsa (deyarli har doim) — bitta yengil so'rov va darhol chiqish
+        if not Reklama.objects.filter(status__in=["ready", "pending", "sending"]).exists():
+            return
+        # Cron har daqiqada ishga tushiradi, partiya esa 1 daqiqadan uzoq davom etishi mumkin.
+        # Qulf bo'lmasa, ikki jarayon bir xil foydalanuvchilarga ikki marta yuborib yuboradi.
+        if not acquire_lock(LOCK_NAME, LOCK_TIMEOUT):
+            self.stdout.write("Boshqa send_reklama jarayoni ishlayapti.")
+            return
+        try:
+            bot = telebot.TeleBot(settings.TELEGRAM_BOT_TOKEN or "0:not-configured", parse_mode="HTML")
+            while self.send_batch(bot, options["delay"]) and options["loop"]:
+                refresh_lock(LOCK_NAME, LOCK_TIMEOUT)
+        except Exception:
+            logger.exception("send_reklama buyrug'ida xato")  # cron xatosi ham xatolar jurnaliga tushadi
+            raise
+        finally:
+            release_lock(LOCK_NAME)
 
     def notify(self, bot, reklama, finished=False):
         text = progress_text(reklama, finished)
@@ -56,9 +77,10 @@ class Command(BaseCommand):
     def send_batch(self, bot, delay):
         """Bitta partiya yuboradi. Yana yuboriladigan narsa qolgan bo'lsa True."""
         with transaction.atomic():
+            # "sending" — oldingi jarayon xato bilan to'xtab qolgan (qulf bizda, demak boshqasi ishlamayapti)
             reklama = (
                 Reklama.objects.select_for_update()
-                .filter(status__in=["ready", "pending"])
+                .filter(status__in=["ready", "pending", "sending"])
                 .order_by("created_at")
                 .first()
             )
@@ -72,13 +94,19 @@ class Command(BaseCommand):
 
         self.notify(bot, reklama)
 
-        sent_ids = reklama.sending_users.values_list("id", flat=True)
-        users = list(TelegramUser.objects.filter(is_active=True).exclude(id__in=sent_ids).order_by("id")[:BATCH_SIZE])
+        users = list(
+            TelegramUser.objects.filter(is_active=True)
+            .exclude(sending_messages=reklama)
+            .order_by("id")[:BATCH_SIZE]
+        )
 
         if not users:
             reklama.status = "completed"
             reklama.completed_at = timezone.now()
             reklama.save(update_fields=["status", "completed_at"])
+            # Kimga yuborilgani faqat yuborish paytida kerak; tugagach bu qatorlar (foydalanuvchilar
+            # soni × reklamalar soni) bazani behuda shishiradi. Statistika (sent/failed) saqlanib qoladi.
+            reklama.sending_users.clear()
             self.notify(bot, reklama, finished=True)
             return False
 
@@ -86,6 +114,7 @@ class Command(BaseCommand):
             reklama.refresh_from_db(fields=["status"])
             if reklama.status == "cancelled":
                 self.stdout.write("Reklama bekor qilindi.")
+                reklama.sending_users.clear()
                 self.notify(bot, reklama, finished=True)
                 return False
             ok = send_reklama(bot, reklama, user)
@@ -97,7 +126,7 @@ class Command(BaseCommand):
             reklama.save(update_fields=["sent_count", "failed_count"])
             time.sleep(delay)
 
-        reklama.status = "pending"
-        reklama.save(update_fields=["status"])
+        # Admin shu orada bekor qilgan bo'lsa, "cancelled" holatini ustidan yozib yubormaymiz
+        Reklama.objects.filter(pk=reklama.pk, status="sending").update(status="pending")
         self.notify(bot, reklama)
         return True

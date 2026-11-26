@@ -1,0 +1,35 @@
+{% extends "webapp/base.html" %}
+{% block content %}
+<div class="state">
+  <div class="icon-badge danger"><i data-lucide="megaphone"></i></div>
+  <h1>Kanallarga obuna bo‘ling</h1>
+  <p class="muted mb-6">Davom etish uchun quyidagi kanallarga obuna bo‘lishingiz kerak.</p>
+  <div class="w-full max-w-xs space-y-3">
+    {% for ch in channels %}
+      {% if ch.url %}
+        <a href="{{ ch.url }}" class="btn btn-secondary" data-tg-link>
+          <i data-lucide="send"></i> {{ ch.title }}
+        </a>
+      {% else %}
+        <div class="btn btn-secondary" aria-disabled="true">{{ ch.title }}</div>
+      {% endif %}
+    {% endfor %}
+    <a href="{{ request.get_full_path }}" class="btn btn-primary">
+      <i data-lucide="check"></i> Obunani tekshirish
+    </a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Telegram ichida kanal havolasini Telegram'ning o'zida ochamiz (WebApp yopilmaydi)
+  (function () {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.openTelegramLink) return;
+    document.querySelectorAll("[data-tg-link]").forEach(function (a) {
+      if (a.href.indexOf("https://t.me/") !== 0) return;
+      a.addEventListener("click", function (e) { e.preventDefault(); tg.openTelegramLink(a.href); });
+    });
+  })();
+</script>
+{% endblock %}

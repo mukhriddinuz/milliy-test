@@ -10,9 +10,11 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from telebot import types
+from telebot.apihelper import ApiTelegramException
 
 from .models import BlockTest, BookTest, Instructions, Reklama, RequiredChannel, TelegramUser, Test
 from .regions import REGIONS
+from .state import clear_state, get_state, set_state
 from .utils import (
     calculate_rasch, calculate_student_scores, generate_block_test_result_pdf, generate_test_result_pdf,
     hisobla_statistika,
@@ -20,7 +22,17 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-bot = telebot.TeleBot(settings.TELEGRAM_BOT_TOKEN or "0:not-configured")
+class _LogHandlerErrors(telebot.ExceptionHandler):
+    """Webhook rejimida handlerdagi kutilmagan xato hech qayerda ko'rinmay yo'qolardi — endi log qilinadi."""
+
+    def handle(self, exception):
+        logger.error(f"Bot handlerida xato: {exception}",
+                     exc_info=(type(exception), exception, exception.__traceback__))
+        return True
+
+
+bot = telebot.TeleBot(settings.TELEGRAM_BOT_TOKEN or "0:not-configured", exception_handler=_LogHandlerErrors(),
+                      num_threads=2)
 ADMIN_ID = settings.TELEGRAM_ADMIN_ID
 MAX_MESSAGE_LENGTH = 4000
 
@@ -36,8 +48,12 @@ def webapp_url(path=""):
 def user_send_message(telegram_id, message, markup=None):
     try:
         bot.send_message(chat_id=telegram_id, text=message, reply_markup=markup, parse_mode="HTML")
+    except ApiTelegramException as e:
+        # 403 — foydalanuvchi botni bloklagan: bu oddiy holat, xato emas
+        log = logger.warning if e.error_code in (400, 403) else logger.error
+        log(f"user_send_message da xato ({telegram_id}): {e}")
     except Exception as e:
-        logger.error(f"user_send_message da xato ({telegram_id}): {e}")
+        logger.warning(f"user_send_message da tarmoq xatosi ({telegram_id}): {e}")
 
 
 def notify_admin_error(title):
@@ -60,6 +76,31 @@ def send_chunked(chat_id, header, lines):
         bot.send_message(chat_id, current, parse_mode="HTML")
 
 
+MEMBER_STATUSES = ("creator", "administrator", "member")
+# Telegram foydalanuvchi kanalda yo'qligini shu xatolar bilan bildiradi
+NOT_MEMBER_ERRORS = ("user not found", "participant_id_invalid", "user_not_participant", "member not found")
+
+
+def _channel_check_failed(channel, error):
+    """Bot kanalni tekshira olmadi (admin emas, ID xato...). Adminga soatiga bir marta xabar beriladi."""
+    logger.error(f"Kanal {channel.channel_id} a'zoligini tekshirib bo'lmadi: {error}")
+    from .state import acquire_lock
+
+    try:
+        if not acquire_lock(f"channel_error_{channel.channel_id}", 60 * 60):
+            return
+        bot.send_message(
+            ADMIN_ID,
+            f"⚠️ <b>Majburiy kanal tekshirilmadi</b>\n\nKanal: {escape(str(channel))}\n"
+            f"Xato: <code>{escape(str(error))[:500]}</code>\n\n"
+            "Bot shu kanalda admin ekanini va kanal ID to'g'riligini tekshiring. "
+            "Hozircha bu kanal foydalanuvchilarni to'sib qo'ymaydi.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Kanal xatosi haqida adminga yozib bo'lmadi")
+
+
 def check_user_membership(user_id):
     """(hamma kanallarga a'zomi, a'zo bo'lmagan kanallar ro'yxati)"""
     if not user_id:
@@ -67,19 +108,41 @@ def check_user_membership(user_id):
     not_joined = []
     for channel in RequiredChannel.objects.filter(is_active=True):
         try:
-            status = bot.get_chat_member(channel.channel_id, user_id).status
-            if status not in ("creator", "administrator", "member"):
+            member = bot.get_chat_member(channel.channel_id, user_id)
+        except ApiTelegramException as e:
+            if any(s in str(e.description or e).lower() for s in NOT_MEMBER_ERRORS):
                 not_joined.append(channel)
-        except Exception:
-            # bot kanalda admin bo'lmasa ham "a'zo emas" deb hisoblanadi
-            not_joined.append(channel)
+            else:
+                # Bot kanalda admin emas / kanal ID xato — bu foydalanuvchining aybi emas,
+                # shuning uchun hammani botdan to'sib qo'ymaymiz, adminni ogohlantiramiz
+                _channel_check_failed(channel, e)
+            continue
+        except Exception as e:
+            # Tarmoq xatosi va h.k. — foydalanuvchini to'smaymiz
+            logger.warning(f"Kanal {channel.channel_id} tekshiruvida tarmoq xatosi: {e}")
+            continue
+        # "restricted" — cheklangan, lekin kanal/guruh a'zosi (is_member=True) bo'lishi mumkin
+        if member.status in MEMBER_STATUSES or (member.status == "restricted" and getattr(member, "is_member", False)):
+            continue
+        not_joined.append(channel)
     return not not_joined, not_joined
+
+
+def channel_link(channel):
+    url = channel.get_link()
+    if not url:
+        # Username ham, invite link ham kiritilmagan yopiq kanal — havolani Telegram'dan olamiz
+        try:
+            url = bot.get_chat(channel.channel_id).invite_link
+        except Exception as e:
+            logger.error(f"Kanal {channel.channel_id} havolasini olib bo'lmadi: {e}")
+    return url
 
 
 def send_subscription_message(chat_id, not_joined):
     keyboard = types.InlineKeyboardMarkup()
     for channel in not_joined:
-        url = channel.get_link()
+        url = channel_link(channel)
         if url:
             keyboard.add(types.InlineKeyboardButton(
                 text=f"📢 {channel.channel_username or f'ID: {channel.channel_id}'}", url=url
@@ -167,7 +230,7 @@ def send_main_menu(chat_id, user):
 def start(message):
     try:
         clear_user(message.from_user.id)
-        ADMIN_REKLAMA_STATE.pop(message.from_user.id, None)
+        clear_state(REKLAMA_STATE, message.from_user.id)
         is_member, not_joined = check_user_membership(message.from_user.id)
         if not is_member:
             return send_subscription_message(message.chat.id, not_joined)
@@ -181,6 +244,9 @@ def start(message):
             return
         if check_ban(user, message.chat.id):
             return
+        if not user.is_active:
+            # Avval botni bloklab, reklama paytida nofaol bo'lib qolgan — qaytib keldi
+            TelegramUser.objects.filter(pk=user.pk).update(is_active=True)
         send_main_menu(message.chat.id, user)
     except Exception:
         logger.exception("start command da xato:")
@@ -196,8 +262,14 @@ def check_subs_callback(call):
         if not is_member:
             return bot.answer_callback_query(call.id, text="🚫 Siz hali barcha kanallarga obuna bo‘lmadingiz!",
                                              show_alert=True)
+        try:
+            bot.answer_callback_query(call.id, text="✅ Obuna tasdiqlandi!")
+        except Exception:
+            pass  # eski tugma bosilgan bo'lsa ham menyu ko'rsatilsin
 
         user = TelegramUser.objects.filter(telegram_id=call.from_user.id).first()
+        if user and check_ban(user, call.message.chat.id):
+            return
         if user is None:
             bot.edit_message_text(
                 chat_id=call.message.chat.id, message_id=call.message.message_id,
@@ -213,8 +285,11 @@ def check_subs_callback(call):
                              reply_markup=get_main_menu(user), parse_mode="Markdown")
     except Exception:
         logger.exception("check_subs_callback da xato:")
-        bot.answer_callback_query(call.id, text="💥 Xatolik yuz berdi. Iltimos, qayta urinib ko‘ring 🔁",
-                                  show_alert=True)
+        try:
+            bot.answer_callback_query(call.id, text="💥 Xatolik yuz berdi. Iltimos, qayta urinib ko‘ring 🔁",
+                                      show_alert=True)
+        except Exception:
+            pass  # callback allaqachon javob olgan bo'lishi mumkin
         notify_admin_error("Obuna tekshiruvi xatosi")
 
 
@@ -396,7 +471,7 @@ def note_instruction_callback(call):
         bot.send_message(call.message.chat.id, f"📘 <b>Yo‘riqnoma:</b>\n\n{instruction.content}", parse_mode="HTML")
         bot.answer_callback_query(call.id, text="📖 Yo‘riqnoma yuborildi!")
     except Exception as e:
-        logger.error(f"note_instruction_callback da xato: {e}")
+        logger.exception(f"note_instruction_callback da xato: {e}")
         bot.answer_callback_query(call.id, text="💥 Xatolik yuz berdi. Iltimos, qayta urinib ko‘ring.",
                                   show_alert=True)
 
@@ -405,14 +480,17 @@ def note_instruction_callback(call):
 # Reklama: /reklama -> kontent -> tasdiqlash -> navbat (manage.py send_reklama yuboradi)
 # ---------------------------------------------------------------------------
 
-ADMIN_REKLAMA_STATE = {}
+REKLAMA_STATE = "reklama"
+REKLAMA_CONTENT_TYPES = {"text": "text", "photo": "image", "video": "video", "document": "document",
+                         "audio": "audio", "voice": "voice"}
 
 
 @bot.message_handler(commands=["reklama"])
 def reklama_start(message):
     if not is_admin(message.from_user.id):
         return
-    ADMIN_REKLAMA_STATE[message.from_user.id] = "waiting_content"
+    clear_user(message.from_user.id)
+    set_state(REKLAMA_STATE, message.from_user.id, "waiting_content")
     bot.send_message(
         message.chat.id,
         "📢 <b>Reklama yuborish</b>\n\n"
@@ -435,32 +513,36 @@ def reklama_confirm_keyboard(reklama_id):
 
 
 @bot.message_handler(
-    func=lambda m: ADMIN_REKLAMA_STATE.get(m.from_user.id) == "waiting_content",
+    func=lambda m: get_state(REKLAMA_STATE, m.from_user.id) == "waiting_content",
     content_types=["text", "photo", "video", "document", "audio", "voice", "animation", "sticker", "video_note"],
 )
 def reklama_receive(message):
     admin_id = message.from_user.id
-    ADMIN_REKLAMA_STATE.pop(admin_id, None)
+    clear_state(REKLAMA_STATE, admin_id)
     if not is_admin(admin_id):
         return
-    if message.text and message.text.strip() == "/bekor":
+    if message.text and message.text.strip().startswith("/"):
         return bot.send_message(message.chat.id, "❌ Reklama bekor qilindi.")
 
+    # html_text / html_caption — qalin, kursiv, havola kabi formatlash saqlanib qoladi
+    if message.content_type == "text":
+        text = message.html_text or ""
+    else:
+        text = getattr(message, "html_caption", None) or ""
     reklama = Reklama.objects.create(
         admin_user_id=admin_id,
         status="draft",
         source_message_id=message.message_id,
         source_chat_id=message.chat.id,
-        message_type=message.content_type if message.content_type in dict(Reklama.TYPE) else "text",
-        text=message.text or message.caption or "",
+        message_type=REKLAMA_CONTENT_TYPES.get(message.content_type, "forward"),
+        text=text,
     )
     total = TelegramUser.objects.filter(is_active=True).count()
     try:
-        from .reklama import build_keyboard
+        from .reklama import deliver
 
         bot.send_message(message.chat.id, "👇 Reklama ko‘rinishi:")
-        bot.copy_message(message.chat.id, message.chat.id, message.message_id,
-                         reply_markup=build_keyboard(reklama.buttons_json))
+        deliver(bot, reklama, message.chat.id)  # foydalanuvchilar aynan shu ko'rinishni oladi
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Ko‘rinishni chiqarib bo‘lmadi: {escape(str(e))}")
     bot.send_message(
@@ -493,21 +575,27 @@ def reklama_confirm(call):
 # Bot ichida ro'yxatdan o'tish: /register, profil: /profile, /me
 # ---------------------------------------------------------------------------
 
-user_data = {}
+REGISTER_STATE = "register"
 
 
 def get_user(uid):
-    if uid not in user_data:
-        user_data[uid] = {"step": "name", "data": {}, "message_id": None, "call_message_id": None}
-    return user_data[uid]
+    return get_state(REGISTER_STATE, uid) or {"step": "name", "data": {}, "message_id": None, "call_message_id": None}
+
+
+def save_user_state(uid, u):
+    set_state(REGISTER_STATE, uid, u)
+
+
+def in_registration(uid):
+    return get_state(REGISTER_STATE, uid) is not None
 
 
 def clear_user(uid):
-    user_data.pop(uid, None)
+    clear_state(REGISTER_STATE, uid)
 
 
-def build_text(uid, extra=""):
-    d = user_data[uid]["data"]
+def build_text(u, extra=""):
+    d = u["data"]
     return (
         "📋 Foydalanuvchi ma'lumotlari olinmoqda:\n\n"
         f"👤 Ismi: {d.get('name', '')}\n"
@@ -554,15 +642,17 @@ def show_profile(message):
 def register_start(message):
     uid = message.from_user.id
     clear_user(uid)
+    clear_state(REKLAMA_STATE, uid)
     u = get_user(uid)
     msg = bot.send_message(
         message.chat.id,
         "📋 Foydalanuvchi ma'lumotlari olinmoqda:\n\nIsmingizni kiriting:\n\n(bekor qilish: /bekor)",
     )
     u["message_id"] = msg.message_id
+    save_user_state(uid, u)
 
 
-@bot.message_handler(func=lambda m: m.from_user.id in user_data, content_types=["text"])
+@bot.message_handler(func=lambda m: in_registration(m.from_user.id), content_types=["text"])
 def register_steps(message):
     uid = message.from_user.id
     u = get_user(uid)
@@ -583,15 +673,17 @@ def register_steps(message):
             u["data"][u["step"]] = text
             if u["step"] == "father_name":
                 u["step"] = "phone"
+                save_user_state(uid, u)
                 kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 kb.add(types.KeyboardButton("📱 Telefon raqamni yuborish", request_contact=True))
                 bot.edit_message_text(chat_id=message.chat.id, message_id=u["message_id"],
-                                      text=build_text(uid, "\nTelefon raqamingizni yuboring:"))
+                                      text=build_text(u, "\nTelefon raqamingizni yuboring:"))
                 bot.send_message(message.chat.id, "👇 Tugma orqali yuboring:", reply_markup=kb)
                 return
             u["step"], prompt = steps[u["step"]]
+            save_user_state(uid, u)
             bot.edit_message_text(chat_id=message.chat.id, message_id=u["message_id"],
-                                  text=build_text(uid, "\n" + prompt))
+                                  text=build_text(u, "\n" + prompt))
         elif u["step"] == "phone":
             bot.send_message(message.chat.id, "👇 Telefon raqamni pastdagi tugma orqali yuboring.")
         else:
@@ -604,7 +696,8 @@ def register_steps(message):
 @bot.message_handler(content_types=["contact"])
 def get_phone(message):
     uid = message.from_user.id
-    if uid not in user_data or user_data[uid]["step"] != "phone":
+    u = get_state(REGISTER_STATE, uid)
+    if not u or u["step"] != "phone":
         return
     if message.contact.user_id and message.contact.user_id != uid:
         return bot.send_message(message.chat.id, "❗️ Faqat o‘zingizning raqamingizni yuboring.")
@@ -615,9 +708,9 @@ def get_phone(message):
     if not phone.startswith("+998"):
         return bot.send_message(message.chat.id, "❌ Faqat O'zbekiston raqami!")
 
-    u = get_user(uid)
     u["data"]["phone"] = phone
     u["step"] = "region"
+    save_user_state(uid, u)
     safe_delete(message.chat.id, message.message_id)
     try:
         tmp = bot.send_message(message.chat.id, "✅", reply_markup=types.ReplyKeyboardRemove())
@@ -630,32 +723,39 @@ def get_phone(message):
         keyboard.add(types.InlineKeyboardButton(r, callback_data=f"region:{r}"))
     msg = bot.send_message(message.chat.id, "Viloyatingizni tanlang:", reply_markup=keyboard)
     u["call_message_id"] = msg.message_id
-    bot.edit_message_text(chat_id=message.chat.id, message_id=u["message_id"], text=build_text(uid))
+    save_user_state(uid, u)
+    bot.edit_message_text(chat_id=message.chat.id, message_id=u["message_id"], text=build_text(u))
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith(("region:", "district:")))
 def location_callback(call):
     uid = call.from_user.id
-    if uid not in user_data:
+    u = get_state(REGISTER_STATE, uid)
+    if not u:
         return bot.answer_callback_query(call.id, "❌ Sessiya tugagan. /register ni qayta bosing")
     try:
-        u = get_user(uid)
         key, value = call.data.split(":", 1)
         if key == "region" and value not in REGIONS:
             return bot.answer_callback_query(call.id, "❌ Noto‘g‘ri viloyat")
         if key == "district" and value not in REGIONS.get(u["data"].get("region"), []):
             return bot.answer_callback_query(call.id, "❌ Avval viloyatni tanlang")
         u["data"][key] = value
+        save_user_state(uid, u)
 
         if key == "region":
             u["step"] = "district"
+            save_user_state(uid, u)
             keyboard = types.InlineKeyboardMarkup()
             for d in REGIONS[value]:
                 keyboard.add(types.InlineKeyboardButton(d, callback_data=f"district:{d}"))
             bot.edit_message_text("Tumaningizni tanlang:", call.message.chat.id, call.message.message_id,
                                   reply_markup=keyboard)
-            bot.edit_message_text(chat_id=call.message.chat.id, message_id=u["message_id"], text=build_text(uid))
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=u["message_id"], text=build_text(u))
         else:
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass  # tugma "soati" to'xtamasa ham ro'yxatdan o'tish davom etadi
             save_user(call)
     except Exception:
         logger.exception("location_callback xatosi")
@@ -665,7 +765,7 @@ def location_callback(call):
 def save_user(call):
     uid = call.from_user.id
     chat_id = call.message.chat.id
-    u = user_data.get(uid)
+    u = get_state(REGISTER_STATE, uid)
     if not u:
         return
     d = u["data"]
@@ -723,5 +823,5 @@ def webhook(request):
         bot.process_new_updates([update])
         return JsonResponse({"ok": True})
     except Exception as e:
-        logger.error(f"webhook da xato: {e}")
+        logger.exception(f"webhook da xato: {e}")
         return JsonResponse({"ok": False, "error": str(e)})
